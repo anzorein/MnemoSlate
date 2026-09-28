@@ -13,3 +13,9 @@
 - Tests `tests/test_develop.py`: simple, combinado, lote, extra, mixto, errores.
 - Pusheado a `main` de https://github.com/anzorein/MnemoSlate como anzorein.
 - Pendiente: BOT_TOKEN en PC dev para smoke test, transcripción voz, conector Fase 4 (SSH/API→OpenCode), Fase 1 (ping/WoL), Fase 3 (Syncthing).
+
+## 2026-09-28 — Sesión 3 (dev-only, sin Pi/PC: cola + lore)
+- `db.py`: tabla `trabajos(jobs_json, extra, estado, user_id)` + `encolar/listar/marcar` (migración IF NOT EXISTS, sin romper DBs existentes).
+- Nuevo `src/mnemoslate/lore.py` (stdlib): `build_prompt()` (coherencia RF-3.2), `render_markdown()` (frontmatter con fuente #IDs, RF-3.3), `slugify()`, `guardar_lore()` en `libro_lore/<categoria>/FECHA-slug.md`.
+- Bot `/desarrollar` ahora persiste `📋 Trabajo #N encolado` en vez de solo mostrar plan.
+- Tests `tests/test_lore.py` (prompt, frontmatter, guardado, roundtrip cola). Pusheado a `main`.

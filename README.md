@@ -14,17 +14,18 @@ MnemoSlate/
   .env.example -> .env    # BOT_TOKEN, ALLOWED_USER_ID (nunca commitear)
   src/mnemoslate/
     config.py             # lee env/.env
-    db.py                 # SQLite: tabla ideas, IDs #N, estados
+    db.py                 # SQLite: ideas + cola trabajos (encolado/enviado/hecho/error)
     develop.py            # parser /desarrollar: + combina, ,/espacio lotea, & extra
-    bot.py                # handlers /anotar /ideas /desarrollar + voz + texto libre
+    lore.py               # prompt OpenCode + .md con frontmatter Fuente #IDs (sin hardware)
+    bot.py                # handlers /anotar /ideas /desarrollar(encola) + voz + texto libre
     __main__.py           # python -m mnemoslate
   data/                   # ideas.db (gitignored, RF-4.2)
-  libro_lore/             # carpeta Syncthing (Fase 3)
-  tests/test_db.py tests/test_develop.py
+  libro_lore/             # .md por categoria (Fase 3 Syncthing)
+  tests/test_db.py tests/test_develop.py tests/test_lore.py
 ```
 
-Futuro (no crear aún): `src/mnemoslate/infra/` (ping/WoL/apagado, Fase 1),
-`src/mnemoslate/lore.py` (conector SSH/API a OpenCode que consumirá el plan, Fase 4).
+Falta con hardware real: `src/mnemoslate/infra/` (ping/WoL/apagado, Fase 1),
+sender SSH/API que consuma la cola hacia OpenCode (Fase 4), transcripción de voz.
 
 ## Uso dev (sin instalar nada global aún)
 

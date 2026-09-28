@@ -30,7 +30,7 @@ from telegram.ext import (
 )
 
 from .config import Settings, load_settings
-from .db import crear_idea, formatear_linea, init_db, listar_ideas, obtener_idea
+from .db import crear_idea, encolar_trabajo, formatear_linea, init_db, listar_ideas, obtener_idea
 from .develop import USO, ParseError, formatear_plan, parse_desarrollar
 
 log = logging.getLogger("mnemoslate")
@@ -141,9 +141,15 @@ async def cmd_desarrollar(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
             f"⚠️ IDs inexistentes: {txt}\nRevisá con `/ideas`.", parse_mode="Markdown"
         )
         return
-    # RNF-4: las ideas quedan pendientes; Fase 4 las tomará vía WoL+SSH.
+    # RNF-4: persiste en cola SQLite; Fase 4 la consumirá vía WoL+SSH. Ideas en pendiente.
+    tid = encolar_trabajo(
+        conn,
+        user_id=update.effective_user.id,  # type: ignore[union-attr]
+        jobs=plan.jobs,
+        extra=plan.extra,
+    )
     await update.effective_message.reply_text(  # type: ignore[union-attr]
-        f"{formatear_plan(plan)}\n\n⏳ Encolado (stub): en Fase 4 esto encenderá la PC. "
+        f"{formatear_plan(plan)}\n\n📋 Trabajo #{tid} encolado: en Fase 4 esto encenderá la PC. "
         "Ideas en *pendiente*."
     )
 

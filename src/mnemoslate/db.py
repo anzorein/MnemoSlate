@@ -1,7 +1,17 @@
-"""Persistencia local de ideas (Fase 2, RF-1.2 / RF-1.3 / RF-4.2 / RNF-4).
+"""Persistencia local de ideas y cola de trabajos (Fase 2/4, RF-1.2 / RF-1.3 / RF-1.5 / RF-4.2 / RNF-4).
 
 Esquema SQLite:
 
+    ideas( ... )      -- ver debajo; expuesto como #id (RF-1.2)
+    trabajos(         -- cola para Fase 4: un ciclo de PC consume N jobs (RF-1.5)
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        jobs_json TEXT NOT NULL,   -- ej: [[12,42],[40]]
+        extra TEXT NOT NULL DEFAULT '',
+        estado TEXT NOT NULL DEFAULT 'encolado'
+            CHECK (estado IN ('encolado','enviado','hecho','error')),
+        user_id INTEGER NOT NULL,
+        created_at, updated_at
+    )
     ideas(
         id INTEGER PRIMARY KEY AUTOINCREMENT,  -- expuesto como #id (RF-1.2)
         user_id INTEGER NOT NULL,              -- telegram user id (RNF-3 auditoría)
@@ -22,6 +32,7 @@ Notas de diseño:
 """
 from __future__ import annotations
 
+import json
 import sqlite3
 import threading
 from dataclasses import dataclass
@@ -54,6 +65,22 @@ CREATE TRIGGER IF NOT EXISTS trg_ideas_updated
 AFTER UPDATE ON ideas FOR EACH ROW
 BEGIN
     UPDATE ideas SET updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id=OLD.id;
+END;
+CREATE TABLE IF NOT EXISTS trabajos(
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    jobs_json TEXT NOT NULL,
+    extra TEXT NOT NULL DEFAULT '',
+    estado TEXT NOT NULL DEFAULT 'encolado'
+        CHECK (estado IN ('encolado','enviado','hecho','error')),
+    user_id INTEGER NOT NULL,
+    created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+    updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+);
+CREATE INDEX IF NOT EXISTS idx_trabajos_estado ON trabajos(estado, id);
+CREATE TRIGGER IF NOT EXISTS trg_trabajos_updated
+AFTER UPDATE ON trabajos FOR EACH ROW
+BEGIN
+    UPDATE trabajos SET updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id=OLD.id;
 END;
 """
 
@@ -146,3 +173,53 @@ def formatear_linea(idea: Idea) -> str:
     emoji = ESTADO_EMOJI.get(idea.estado, "❔")
     fecha = idea.created_at[:10] if idea.created_at else "?"
     return f"#{idea.id} {emoji} {idea.estado} · {fecha}\n  {extracto(idea.contenido)}"
+
+
+ESTADOS_TRABAJO = ("encolado", "enviado", "hecho", "error")
+
+
+@dataclass
+class Trabajo:
+    id: int
+    jobs: list[list[int]]
+    extra: str
+    estado: str
+    created_at: str
+
+
+def encolar_trabajo(conn: sqlite3.Connection, user_id: int,
+                    jobs: list[list[int]], extra: str = "") -> int:
+    """Encola un plan parseado para que Fase 4 lo consuma en un ciclo de PC."""
+    if not jobs or not all(j for j in jobs):
+        raise ValueError("jobs vacío")
+    with _lock, conn:
+        cur = conn.execute(
+            "INSERT INTO trabajos(jobs_json, extra, user_id) VALUES (?,?,?)",
+            (json.dumps(jobs), extra.strip(), user_id),
+        )
+        return int(cur.lastrowid)
+
+
+def listar_trabajos(conn: sqlite3.Connection, estado: str | None = None,
+                    limit: int = 20) -> list[Trabajo]:
+    q = "SELECT id, jobs_json, extra, estado, created_at FROM trabajos"
+    params: list = []
+    if estado:
+        if estado not in ESTADOS_TRABAJO:
+            raise ValueError(f"estado inválido: {estado}")
+        q += " WHERE estado=?"
+        params.append(estado)
+    q += " ORDER BY id ASC LIMIT ?"
+    params.append(limit)
+    with _lock:
+        rows = conn.execute(q, params).fetchall()
+    return [Trabajo(r["id"], json.loads(r["jobs_json"]), r["extra"],
+                    r["estado"], r["created_at"]) for r in rows]
+
+
+def marcar_trabajo(conn: sqlite3.Connection, trabajo_id: int, nuevo: str) -> bool:
+    if nuevo not in ESTADOS_TRABAJO:
+        raise ValueError(f"estado inválido: {nuevo}")
+    with _lock, conn:
+        cur = conn.execute("UPDATE trabajos SET estado=? WHERE id=?", (nuevo, trabajo_id))
+        return cur.rowcount > 0
