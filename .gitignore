@@ -1,0 +1,10 @@
+.env
+data/*.db*
+data/*.db-*
+!data/.gitkeep
+__pycache__/
+*.pyc
+.venv/
+venv/
+*.ogg
+*.oga

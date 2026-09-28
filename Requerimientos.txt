@@ -1,0 +1,62 @@
+# Documento de Requerimientos: Sistema de Worldbuilding & Lore
+
+## 1. Visión General del Sistema
+
+El objetivo es permitir la captura rápida de ideas de *worldbuilding* desde un dispositivo móvil (vía Telegram) y su posterior desarrollo estructurado en archivos Markdown (`.md`) utilizando **OpenCode Interpreter** en la PC de escritorio. El sistema optimiza el consumo energético encendiendo la PC únicamente cuando se requiere procesamiento pesado.
+
+---
+
+## 2. Requerimientos Funcionales (RF)
+
+### RF-1: Módulo de Interfaz y Captura (Telegram Bot)
+
+* **RF-1.1 (Comando `/idea` / `/anotar`):** Debe permitir guardar texto o audios de voz (transcritos) en un buzón de entrada crudo (`inbox`). Debe responder inmediatamente con la confirmación de guardado sin encender la PC.
+* **RF-1.2 (Sistema de Indexación / IDs):** El sistema asignará automáticamente un ID único e incremental (`#1`, `#2`, `#3`...) a cada idea capturada.
+* **RF-1.3 (Comando `/ideas` / `/inbox`):** Debe listar las ideas registradas, mostrando su ID, un extracto del texto y su estado (*Pendiente*, *Procesada*, *Archivada*).
+* **RF-1.4 (Comando `/desarrollar` / `/lore`):** Debe aceptar uno o más IDs (ej: `#42`), permitiendo combinarlos (`#12 + #42`) o agregar instrucciones adicionales de *prompting* (`/desarrollar #42 & brainstorm de 3 criaturas`).
+* **RF-1.5 (Procesamiento en Lote):** Debe permitir enviar comandos para procesar múltiples ideas secuencialmente (`#40, #41, #42`) en un único ciclo de encendido de la PC.
+
+### RF-2: Módulo de Infraestructura y Energía (Raspberry Pi 24/7)
+
+* **RF-2.1 (Monitoreo de Estado):** Antes de iniciar un procesamiento pesado, la Raspberry Pi comprobará la disponibilidad de la PC mediante `ping` en la red local.
+* **RF-2.2 (Encendido Remoto / Wake-on-LAN):** Si la PC está apagada/suspendida y se recibe un comando de desarrollo, la Raspberry Pi enviará un *Magic Packet* para encender la PC de escritorio.
+* **RF-2.3 (Gestión de Errores / Auditoría):** Si la PC no responde tras un tiempo límite de arranque, la idea se mantendrá en estado *Pendiente* y el usuario recibirá una alerta en Telegram.
+* **RF-2.4 (Apagado Autónomo):** Al finalizar la generación del archivo o tras un periodo configurable de inactividad, la Raspberry Pi enviará una orden de apagado/suspensión a la PC.
+
+### RF-3: Módulo de Procesamiento Pesado (OpenCode en PC)
+
+* **RF-3.1 (Servicio de Escucha Remota):** La PC expondrá una interfaz (vía SSH o API interna) para recibir los prompts enviados desde la Raspberry Pi.
+* **RF-3.2 (Procesamiento con Contexto):** OpenCode leerá los archivos de *lore* existentes para mantener la coherencia del mundo al desarrollar la nueva idea.
+* **RF-3.3 (Generación de Archivos `.md`):** Las respuestas estructuradas se guardarán en carpetas temáticas en formato Markdown, incluyendo trazabilidad en los metadatos (ej: `Fuente: Idea #42`).
+
+### RF-4: Módulo de Sincronización y Persistencia (Syncthing)
+
+* **RF-4.1 (Sincronización P2P):** Mantendrá replicada la carpeta del libro (`/libro_lore`) entre la Raspberry Pi y la PC de escritorio en tiempo real.
+* **RF-4.2 (Persistencia Local en Raspy):** La Raspberry Pi mantendrá la copia local más reciente de la base de datos de ideas (JSON/SQLite) y de los archivos `.md`, asegurando acceso a la información aunque la PC esté apagada.
+
+---
+
+## 3. Requerimientos No Funcionales (RNF)
+
+* **RNF-1 (Eficiencia Energética):** La PC de escritorio solo permanecerá encendida durante el tiempo estrictamente necesario para procesar peticiones complejas. Luego de un tiempo después de haber recibido un comando de desarrollo, se procederá a apagarla.
+* **RNF-2 (Baja Latencia de Captura):** El comando `/anotar` debe responder en Telegram de forma rápida.
+* **RNF-3 (Seguridad y Privacidad):** El bot responderá exclusivamente a tu ID de usuario de Telegram. La comunicación entre la Raspy y la PC se realizará dentro de la red local sin abrir puertos públicos.
+* **RNF-4 (Tolerancia a Fallos):** Ninguna idea enviada por Telegram debe perderse, independientemente de si la PC enciende correctamente o no.
+
+---
+
+## 4. Partes para el Desarrollo
+
+| Parte | Tareas Principales |
+| --- | --- |
+| **Parte 1: Red y Energía** | Configurar Wake-on-LAN en la PC (BIOS y S.O.) y probar el envío de *Magic Packet* desde la Raspy (`wakeonlan`). |
+| **Parte 2: Base de Datos & Bot Base** | Programar el bot de Telegram en la Raspy con los comandos `/anotar`, `/ideas` y el sistema de asignación de IDs (JSON/SQLite). |
+| **Parte 3: Sincronización** | Instalar y configurar **Syncthing** entre la Raspberry Pi y la PC para la carpeta de proyectos. |
+| **Parte 4: Integración OpenCode** | Programar el conector remoto (SSH/API) para que la Raspy le pase los comandos `/desarrollar #ID` a OpenCode en la PC y luego envíe el comando de apagado. |
+
+---
+
+## 5. Control de versiones y manejo de sesiones
+
+* **El código:** Se utiliza un repositorio en GitHub. El agente puede commitear y pushear con el nombre de usuario de GitHub.
+* **Flujo de trabajo:** Como Git no sincroniza la memoria del LLM, conviene crear un archivo llamado estado_proyecto.md en la raíz de tu código. Antes de cerrar OpenCode se ejecuta "Resumí en estado_proyecto.md todo lo que hicimos hoy, qué falta hacer y cómo está estructurado el código". Luego en la otra PC, se abre OpenCode, se pasa ese archivo ("Leé estado_proyecto.md y sigamos desde ahí") y la IA retoma el contexto al instante sin necesidad de sincronizar el historial de chat.
