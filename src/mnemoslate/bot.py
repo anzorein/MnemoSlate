@@ -1,8 +1,11 @@
-"""Bot de Telegram — Fase 2: captura rápida (RF-1.1 / RF-1.2 / RF-1.3).
+"""Bot de Telegram — Fase 2 + parser /desarrollar (RF-1.1 / RF-1.2 / RF-1.3 / RF-1.4 / RF-1.5).
 
 - /anotar, /idea -> guarda texto en inbox SQLite, responde con #ID (RNF-2: inmediato,
   sin encender la PC).
 - /ideas, /inbox -> lista ID + extracto + estado.
+- /desarrollar, /lore -> parsea #IDs (+ combina, ,/espacio lotea, & extra) y valida
+  contra la DB. STUB Fase 4: NO enciende la PC, solo muestra el plan y mantiene
+  las ideas en pendiente (RNF-4).
 - Texto libre en chat privado -> también se guarda (captura móvil rápida).
 - Voz -> se guarda como tipo 'voz' con marcador de transcripción pendiente
   (la transcripción real con Whisper local se agrega en iteración siguiente).
@@ -27,7 +30,8 @@ from telegram.ext import (
 )
 
 from .config import Settings, load_settings
-from .db import cambiar_estado, crear_idea, formatear_linea, init_db, listar_ideas
+from .db import crear_idea, formatear_linea, init_db, listar_ideas, obtener_idea
+from .develop import USO, ParseError, formatear_plan, parse_desarrollar
 
 log = logging.getLogger("mnemoslate")
 
@@ -35,8 +39,10 @@ AYUDA = (
     "📝 *MnemoSlate* — buzón de worldbuilding\n\n"
     "`/anotar <texto>` — guardar idea (alias: `/idea`)\n"
     "`/ideas` — listar últimas (alias: `/inbox`)\n"
+    "`/desarrollar #ID [...]` — plan de lore (alias: `/lore`)\n"
+    "  `#12 + #42` combina · `#40, #41` lotea · `& texto` agrega instrucción\n"
     "También podés mandarme texto directamente o una nota de voz.\n\n"
-    "Próximo: `/desarrollar #ID` (Fase 4)."
+    "Fase 4 pendiente: el plan todavía NO enciende la PC."
 )
 
 
@@ -110,6 +116,38 @@ async def cmd_ideas(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     )
 
 
+async def cmd_desarrollar(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """/desarrollar | /lore — RF-1.4 + RF-1.5 (stub: parsea y valida, no enciende PC)."""
+    if not await _solo_autorizado(update):
+        return
+    raw = " ".join(context.args or []).strip()
+    if not raw:
+        await update.effective_message.reply_text(  # type: ignore[union-attr]
+            USO, parse_mode="Markdown"
+        )
+        return
+    try:
+        plan = parse_desarrollar(raw)
+    except ParseError as e:
+        await update.effective_message.reply_text(  # type: ignore[union-attr]
+            f"⚠️ {e}\n\n{USO}", parse_mode="Markdown"
+        )
+        return
+    conn = _conn(context)
+    faltantes = [i for i in plan.todos_ids if obtener_idea(conn, i) is None]
+    if faltantes:
+        txt = ", ".join(f"#{i}" for i in faltantes)
+        await update.effective_message.reply_text(  # type: ignore[union-attr]
+            f"⚠️ IDs inexistentes: {txt}\nRevisá con `/ideas`.", parse_mode="Markdown"
+        )
+        return
+    # RNF-4: las ideas quedan pendientes; Fase 4 las tomará vía WoL+SSH.
+    await update.effective_message.reply_text(  # type: ignore[union-attr]
+        f"{formatear_plan(plan)}\n\n⏳ Encolado (stub): en Fase 4 esto encenderá la PC. "
+        "Ideas en *pendiente*."
+    )
+
+
 async def on_texto_libre(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Texto sin comando en privado = anotación directa (captura rápida móvil)."""
     if not await _solo_autorizado(update):
@@ -163,6 +201,7 @@ def build_app(settings: Settings) -> "ApplicationBuilder":
     app.add_handler(CommandHandler(["start", "help", "ayuda"], cmd_start))
     app.add_handler(CommandHandler(["anotar", "idea"], cmd_anotar))
     app.add_handler(CommandHandler(["ideas", "inbox"], cmd_ideas))
+    app.add_handler(CommandHandler(["desarrollar", "lore"], cmd_desarrollar))
     app.add_handler(MessageHandler(filters.VOICE, on_voz))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, on_texto_libre))
     app.add_error_handler(on_error)

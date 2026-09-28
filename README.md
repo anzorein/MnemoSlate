@@ -15,15 +15,16 @@ MnemoSlate/
   src/mnemoslate/
     config.py             # lee env/.env
     db.py                 # SQLite: tabla ideas, IDs #N, estados
-    bot.py                # handlers /anotar /ideas + voz + texto libre
+    develop.py            # parser /desarrollar: + combina, ,/espacio lotea, & extra
+    bot.py                # handlers /anotar /ideas /desarrollar + voz + texto libre
     __main__.py           # python -m mnemoslate
   data/                   # ideas.db (gitignored, RF-4.2)
   libro_lore/             # carpeta Syncthing (Fase 3)
-  tests/test_db.py
+  tests/test_db.py tests/test_develop.py
 ```
 
 Futuro (no crear aún): `src/mnemoslate/infra/` (ping/WoL/apagado, Fase 1),
-`src/mnemoslate/lore.py` (conector SSH/API a OpenCode + `/desarrollar`, Fase 4).
+`src/mnemoslate/lore.py` (conector SSH/API a OpenCode que consumirá el plan, Fase 4).
 
 ## Uso dev (sin instalar nada global aún)
 
