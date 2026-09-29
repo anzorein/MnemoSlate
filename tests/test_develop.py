@@ -28,6 +28,22 @@ class TestParser(unittest.TestCase):
         p = parse_desarrollar("#40 #41 42")
         self.assertEqual(p.jobs, [[40], [41], [42]])
 
+    def test_espacios_alrededor_de_mas_no_parten(self):
+        for texto in ("#12 + #42", "#12 +42", "#12+ #42", "#12+#42", "#12  +  #42"):
+            with self.subTest(texto=texto):
+                self.assertEqual(parse_desarrollar(texto).jobs, [[12, 42]])
+
+    def test_coma_manda_sobre_espacios(self):
+        p = parse_desarrollar("#12, #13 + #14")
+        self.assertEqual(p.jobs, [[12], [13, 14]])
+        self.assertEqual(p.es_lote, True)
+        self.assertEqual(p.es_combinado, True)
+
+    def test_mas_mal_colocado(self):
+        for malo in ["#12 +", "+ #5", "#12 + + #3", "#12 + , #3"]:
+            with self.assertRaises(ParseError, msg=malo):
+                parse_desarrollar(malo)
+
     def test_extra(self):
         p = parse_desarrollar("#42 & brainstorm de 3 criaturas")
         self.assertEqual(p.jobs, [[42]])

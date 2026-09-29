@@ -29,8 +29,6 @@ MAX_JOBS = 10
 MAX_IDS_POR_JOB = 10
 EXTRA_MAX = 2000
 
-_TOKEN = re.compile(r"[#,+\s]|&\d*|\d+|.", re.DOTALL)
-
 
 class ParseError(ValueError):
     """Error de sintaxis en /desarrollar (se muestra ayuda al usuario)."""
@@ -73,9 +71,10 @@ def parse_desarrollar(raw: str) -> DevelopPlan:
     if not ids_part.strip():
         raise ParseError("Faltan IDs. Ej: `/desarrollar #42`")
 
-    # Normaliza separadores y tokeniza: "#12 + #42, #43" -> ['#','12','+','#','42',',',...]
+    # Normaliza separadores y tokeniza: "#12 + #42, #43" -> ['#','12','+','#','42',',','...']
+    # OJO: los espacios se conservan como tokens porque separan jobs (RF-1.5).
     norm = ids_part.replace("+", " + ").replace(",", " , ")
-    tokens = [t for t in re.findall(r"#|\d+|\+|,", norm)]
+    tokens = [t for t in re.findall(r"[#,+]|\d+|\s", norm)]
     if not tokens:
         raise ParseError("No encontré IDs. Ej: `/desarrollar #12 + #42`")
 
@@ -95,14 +94,44 @@ def parse_desarrollar(raw: str) -> DevelopPlan:
             jobs.append(seen)
             actual = []
 
+    def signo_antes(i: int) -> int:
+        """Índice del token significativo anterior a i (saltando espacios)."""
+        j = i - 1
+        while j >= 0 and tokens[j].isspace():
+            j -= 1
+        return j
+
+    def signo_despues(i: int) -> int:
+        """Índice del token significativo siguiente a i (saltando espacios)."""
+        j = i + 1
+        while j < len(tokens) and tokens[j].isspace():
+            j += 1
+        return j
+
+    def tok(j: int) -> str:
+        """Token en j, o cadena vacía si el índice está fuera de rango."""
+        return tokens[j] if 0 <= j < len(tokens) else ""
+
+    def es_id(j: int) -> bool:
+        """True si en j hay un ID: dígitos, o '#' pegado a dígitos."""
+        if j < 0 or j >= len(tokens):
+            return False
+        if tokens[j].isdigit():
+            return True
+        return tokens[j] == "#" and j + 1 < len(tokens) and tokens[j + 1].isdigit()
+
     i = 0
     while i < len(tokens):
         t = tokens[i]
         if t == ",":
-            flush()
+            flush()  # ',' siempre separa jobs (lote secuencial, RF-1.5)
+        elif t.isspace():
+            # Un espacio separa jobs, EXCEPTO si está pegado a un '+' (combina).
+            if tok(signo_antes(i)) != "+" and tok(signo_despues(i)) != "+":
+                flush()
         elif t == "+":
-            # '+' entre IDs; si aparece al inicio/fin o duplicado, es error
-            if not actual or (i + 1 >= len(tokens) or tokens[i + 1] in ("+", ",")):
+            # '+' une dos IDs del mismo job, admitiendo espacios alrededor.
+            if not (es_id(signo_antes(i)) and es_id(signo_despues(i))):
                 raise ParseError("`+` debe ir entre IDs. Ej: `#12 + #42`")
         elif t == "#":
             if i + 1 >= len(tokens) or not tokens[i + 1].isdigit():

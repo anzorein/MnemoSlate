@@ -24,15 +24,31 @@ class Settings:
     ideas_page_size: int = 10
 
 
-def load_settings(root: Path | None = None) -> Settings:
-    root = root or Path.cwd()
-    # Busca .env en raíz del proyecto y en cwd (PC dev vs Raspy)
-    for candidate in (root / ".env", Path.cwd() / ".env"):
+@dataclass(frozen=True)
+class InfraSettings:
+    """Datos de la PC de escritorio para la Fase 1 (red y energía)."""
+    pc_mac: str
+    pc_ip: str
+    pc_broadcast: str = ""
+    wol_port: int = 9
+    wake_timeout: int = 120
+    ping_timeout: int = 2
+    ssh_user: str = ""
+    ssh_key: str = ""
+
+
+def _buscar_env(root: Path | None) -> None:
+    """Carga el .env de la raíz del proyecto o del cwd (PC dev vs Raspy)."""
+    base = root or Path.cwd()
+    for candidate in (base / ".env", Path.cwd() / ".env"):
         if candidate.exists():
             load_dotenv(candidate)
-            break
-    else:
-        load_dotenv()
+            return
+    load_dotenv()
+
+
+def load_settings(root: Path | None = None) -> Settings:
+    _buscar_env(root)
 
     token = os.getenv("BOT_TOKEN", "").strip()
     user = os.getenv("ALLOWED_USER_ID", "").strip()
@@ -49,4 +65,27 @@ def load_settings(root: Path | None = None) -> Settings:
         database_path=Path(db_path),
         log_level=os.getenv("LOG_LEVEL", "INFO").upper(),
         ideas_page_size=int(os.getenv("IDEAS_PAGE_SIZE", "10")),
+    )
+
+
+def load_infra_settings(root: Path | None = None) -> InfraSettings:
+    """Carga la config de red/energía. NO exige BOT_TOKEN (CLI usable sola)."""
+    _buscar_env(root)
+
+    mac = os.getenv("PC_MAC", "").strip()
+    ip = os.getenv("PC_IP", "").strip()
+    if not mac:
+        raise RuntimeError("PC_MAC no configurado. Copiá .env.example a .env.")
+    if not ip:
+        raise RuntimeError("PC_IP no configurado (IP reservada de la PC en el router).")
+
+    return InfraSettings(
+        pc_mac=mac,
+        pc_ip=ip,
+        pc_broadcast=os.getenv("PC_BROADCAST", "").strip(),
+        wol_port=int(os.getenv("WOL_PORT", "9")),
+        wake_timeout=int(os.getenv("WAKE_TIMEOUT", "120")),
+        ping_timeout=int(os.getenv("PING_TIMEOUT", "2")),
+        ssh_user=os.getenv("SSH_USER", "").strip(),
+        ssh_key=os.getenv("SSH_KEY", "").strip(),
     )
