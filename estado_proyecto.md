@@ -180,3 +180,28 @@
 - **Pendiente inmediato**: primer `--test` real desde la Pi (ver comando manual en
   README "Probar a mano en la PC").
 
+## 2026-09-29 — Sesión 14 (`-f` es glotón: el mensaje tenía que ir primero)
+- **Segundo bug real, encontrado por el usuario al probar por `ssh` desde la Pi**:
+  `File not found: El`. En `run.ts`, `-f` es `type: "string", array: true`: yargs
+  consume como valores del array TODO lo que sigue hasta el próximo flag. Como el
+  mensaje iba *después* de `-f`, yargs tomó sus palabras como rutas de archivo y
+  reventó en la primera (`El`). No era culpa del quoting del usuario: el orden de
+  los argumentos estaba mal en el sender.
+- Fix: `comando_opencode_remoto()` ahora emite el mensaje **primero** y deja `-f`
+  **al final** (último token), así no hay nada que `-f` pueda tragarse.
+- `INSTRUCCION_CORTA` sin caracteres que cmd.exe trata como especiales
+  (`( ) & | < > ^ % !`): se había eliminado `---` y ahora lo vigila un test.
+- **Sobre `%USERPROFILE%`**: no es elegir dónde mandar el payload, es *decir en
+  completo dónde `scp` ya lo puso*. `comando_scp` manda destino sin carpeta
+  (`user@host:mnemo_payload_….json`) → cae en el home; como `-f` resuelve relativo
+  al `--dir`, hace falta la ruta absoluta. La alternativa (scp directo a la carpeta
+  del lore) ensuciaría el repo y exige que esa carpeta sea escribible.
+- **Aclarado un error mío**: usé el nombre "lore" para la carpeta de la PC en un
+  ejemplo, y no existe. La real es `D:\Documentos\Projects\Edessia`, que ya tiene
+  `wiki/ references/ outputs/ scribe/`. No hace falta clonar el repo de lore en la
+  PC: `EDESSIA_PC_DIR` apunta ahí y OpenCode lee el lore de ese mismo lugar.
+- Tests nuevos: mensaje antes de `-f` y de `--format json`, `-f` último token,
+  instrucción sin caracteres hostiles de cmd. **Suite: 93/93 OK.**
+- **Pendiente inmediato**: ver la salida real de `opencode run --format json` con
+  Big Pickle para fijar `extraer_texto_salida()`.
+

@@ -239,6 +239,23 @@ class TestSalida(unittest.TestCase):
             self.assertTrue(r.startswith('"') and r.endswith('"'), r)
             self.assertIn(nombre, r)
 
+    def test_mensaje_primero_y_f_ultimo(self):
+        # Regresión: `-f` es un flag array (yargs) que se traga todo lo que sigue.
+        # Con el mensaje después, opencode TOMABA sus palabras como rutas de archivo
+        # y fallaba con "File not found: El".
+        c = comando_opencode_remoto(r"D:\Documentos\Projects\Edessia", "p_1_1.json")
+        self.assertLess(c.index(INSTRUCCION_CORTA), c.index("-f "),
+                        "el mensaje debe ir antes de -f")
+        self.assertLess(c.index(INSTRUCCION_CORTA), c.index("--format json"),
+                        "el mensaje debe ir primero")
+        self.assertTrue(c.rstrip().endswith('"'),
+                        f"-f debe ser el ultimo token: {c}")
+
+    def test_instruccion_sin_caracteres_hostiles_para_cmd(self):
+        # cmd.exe trata estos como especiales: romperian el comando remoto.
+        for ch in "()&|<>^%!\r\n":
+            self.assertNotIn(ch, INSTRUCCION_CORTA, f"caracter hostil: {ch!r}")
+
     def test_instruccion_no_rompe_el_comando_remoto(self):
         # El comando remoto entrecomilla la instrucción: unas comillas dobles
         # dentro romperían el cmd remoto.

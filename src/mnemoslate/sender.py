@@ -54,14 +54,15 @@ OPENCODE_TIMEOUT = 600.0
 
 # Instrucción corta que viaja en argv (el prompt largo va en el archivo adjunto).
 # Debe pedir Markdown de REFERENCIA: scribe queda reservado para `scribe/` → PDF.
-# Sin comillas dobles (el comando remoto las envuelve) y sin vallas de código.
 # Nombra explícitamente el campo `prompt` del JSON adjunto: `-f` adjunta el
 # archivo entero, así que el modelo tiene que saber dónde está el encargo.
+# Sin comillas dobles (el comando remoto las envuelve) ni caracteres que cmd.exe
+# trata como especiales: () & | < > ^ % !
 INSTRUCCION_CORTA = (
     "El archivo adjunto es un JSON cuyo campo prompt trae el encargo. "
     "Desarrolla ese lore y devuelve SOLO el documento final en Markdown de "
-    "referencia: encabezados y prosa, sin frontmatter (---), sin vallas de "
-    "codigo y sin comentarios sobre tu proceso."
+    "referencia: encabezados y prosa, sin frontmatter, sin vallas de codigo "
+    "y sin comentarios sobre tu proceso."
 )
 
 # Idea canónica de prueba para `--test`: una escena corta, siempre igual. Vive en
@@ -132,14 +133,20 @@ def comando_opencode_remoto(edessia_pc_dir: str, payload_remoto: str,
                             modelo: str = "") -> str:
     """Comando que corre EN la PC (cmd). Rutas con espacios entrecomilladas.
 
+    El mensaje va PRIMERO y `-f` al ÚLTIMO, a propósito: `-f` es un flag tipo
+    array (yargs) que consume glotonamente todo lo que viene detrás hasta el
+    próximo flag. Con el mensaje después, sus palabras se tomaban como rutas y
+    opencode fallaba con `File not found: El` (la primera palabra del mensaje).
+    Con el mensaje primero, `-f` no tiene nada detrás que tragarse.
+
     `payload_remoto` es el NOMBRE pelado tal como lo deja `scp` en el home.
     """
     ed = f'"{edessia_pc_dir}"' if " " in edessia_pc_dir else edessia_pc_dir
     pl = ruta_payload_absoluta(payload_remoto)
     modelo_flag = f" -m {modelo}" if modelo.strip() else ""
     return (
-        f'opencode run --format json{modelo_flag} --dir {ed} -f {pl} '
-        f'"{INSTRUCCION_CORTA}"'
+        f'opencode run "{INSTRUCCION_CORTA}" --format json{modelo_flag} '
+        f'--dir {ed} -f {pl}'
     )
 
 
