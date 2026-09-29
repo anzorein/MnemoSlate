@@ -12,12 +12,13 @@ MnemoSlate/
   estado_proyecto.md      # memoria entre sesiones/PCs (ver §5 de Requerimientos)
   requirements.txt
   .env.example -> .env    # BOT_TOKEN, ALLOWED_USER_ID (nunca commitear)
-  src/mnemoslate/
+   src/mnemoslate/
     config.py             # lee env/.env (Settings del bot + InfraSettings de red)
-    db.py                 # SQLite: ideas + cola trabajos (encolado/enviado/hecho/error)
+    db.py                 # SQLite: ideas + trabajos + etiquetas
     develop.py            # parser /desarrollar: + combina, ,/espacio lotea, & extra
+    tags.py               # #palabra=tag/#123=ID, fuzzy anti-typo, hook auto-tag futuro
     lore.py               # prompt OpenCode + .md con frontmatter Fuente #IDs (sin hardware)
-    bot.py                # handlers /anotar /ideas /desarrollar(encola) + voz + texto libre
+    bot.py                # /anotar /ideas[#tag] /tags /tag /desarrollar + voz + texto libre
     infra/                # Fase 1: red y energía (solo stdlib, corre en la Pi)
       wol.py              # Magic Packet: normalizar MAC, armar y enviar (RF-2.2)
       net.py              # ping + espera de arranque + cálculo de broadcast (RF-2.1/2.3)
@@ -26,7 +27,7 @@ MnemoSlate/
     __main__.py           # python -m mnemoslate
   data/                   # ideas.db (gitignored, RF-4.2)
   libro_lore/             # .md por categoria (Fase 3 Syncthing)
-  tests/test_db.py tests/test_develop.py tests/test_lore.py
+  tests/test_db.py tests/test_develop.py tests/test_lore.py tests/test_tags.py
      tests/test_wol.py tests/test_net.py
 ```
 

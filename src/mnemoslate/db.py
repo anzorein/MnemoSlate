@@ -2,16 +2,9 @@
 
 Esquema SQLite:
 
-    ideas( ... )      -- ver debajo; expuesto como #id (RF-1.2)
-    trabajos(         -- cola para Fase 4: un ciclo de PC consume N jobs (RF-1.5)
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        jobs_json TEXT NOT NULL,   -- ej: [[12,42],[40]]
-        extra TEXT NOT NULL DEFAULT '',
-        estado TEXT NOT NULL DEFAULT 'encolado'
-            CHECK (estado IN ('encolado','enviado','hecho','error')),
-        user_id INTEGER NOT NULL,
-        created_at, updated_at
-    )
+    ideas( ... )      -- expuesto como #id (RF-1.2)
+    trabajos( ... )   -- cola Fase 4: un ciclo de PC consume N jobs (RF-1.5)
+    etiquetas / idea_etiqueta  -- micro-etiquetado: #palabra = tag, #123 = solo ID
     ideas(
         id INTEGER PRIMARY KEY AUTOINCREMENT,  -- expuesto como #id (RF-1.2)
         user_id INTEGER NOT NULL,              -- telegram user id (RNF-3 auditoría)
@@ -82,6 +75,17 @@ AFTER UPDATE ON trabajos FOR EACH ROW
 BEGIN
     UPDATE trabajos SET updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id=OLD.id;
 END;
+CREATE TABLE IF NOT EXISTS etiquetas(
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    nombre TEXT NOT NULL UNIQUE,
+    created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+);
+CREATE TABLE IF NOT EXISTS idea_etiqueta(
+    idea_id INTEGER NOT NULL REFERENCES ideas(id) ON DELETE CASCADE,
+    etiqueta_id INTEGER NOT NULL REFERENCES etiquetas(id) ON DELETE CASCADE,
+    PRIMARY KEY (idea_id, etiqueta_id)
+);
+CREATE INDEX IF NOT EXISTS idx_idea_etiqueta_tag ON idea_etiqueta(etiqueta_id, idea_id);
 """
 
 
@@ -223,3 +227,68 @@ def marcar_trabajo(conn: sqlite3.Connection, trabajo_id: int, nuevo: str) -> boo
     with _lock, conn:
         cur = conn.execute("UPDATE trabajos SET estado=? WHERE id=?", (nuevo, trabajo_id))
         return cur.rowcount > 0
+
+
+def _idea_desde_fila(r: sqlite3.Row) -> Idea:
+    return Idea(r["id"], r["contenido"], r["estado"], r["tipo"], r["created_at"])
+
+
+def etiquetar_idea(conn: sqlite3.Connection, idea_id: int, tags: list[str]) -> list[str]:
+    """Asigna tags (normalizados, dedup) a una idea. Crea los inexistentes."""
+    from .tags import MAX_TAGS_POR_IDEA, normalizar_tag
+
+    normalizados: list[str] = []
+    for t in tags:
+        try:
+            n = normalizar_tag(t)
+        except ValueError:
+            continue
+        if n not in normalizados:
+            normalizados.append(n)
+    normalizados = normalizados[:MAX_TAGS_POR_IDEA]
+    with _lock, conn:
+        for n in normalizados:
+            conn.execute("INSERT OR IGNORE INTO etiquetas(nombre) VALUES (?)", (n,))
+            conn.execute(
+                "INSERT OR IGNORE INTO idea_etiqueta(idea_id, etiqueta_id) "
+                "VALUES (?, (SELECT id FROM etiquetas WHERE nombre=?))",
+                (idea_id, n),
+            )
+    return normalizados
+
+
+def etiquetas_de_idea(conn: sqlite3.Connection, idea_id: int) -> list[str]:
+    with _lock:
+        rows = conn.execute(
+            "SELECT e.nombre FROM etiquetas e "
+            "JOIN idea_etiqueta ie ON ie.etiqueta_id=e.id "
+            "WHERE ie.idea_id=? ORDER BY e.nombre",
+            (idea_id,),
+        ).fetchall()
+    return [r["nombre"] for r in rows]
+
+
+def listar_etiquetas(conn: sqlite3.Connection) -> list[tuple[str, int]]:
+    """[(nombre, conteo_ideas)] ordenadas por uso desc, luego nombre."""
+    with _lock:
+        rows = conn.execute(
+            "SELECT e.nombre, COUNT(ie.idea_id) AS n FROM etiquetas e "
+            "LEFT JOIN idea_etiqueta ie ON ie.etiqueta_id=e.id "
+            "GROUP BY e.id ORDER BY n DESC, e.nombre"
+        ).fetchall()
+    return [(r["nombre"], r["n"]) for r in rows]
+
+
+def ideas_por_etiqueta(conn: sqlite3.Connection, tag: str,
+                       limit: int = 10, offset: int = 0) -> list[Idea]:
+    from .tags import normalizar_tag
+
+    with _lock:
+        rows = conn.execute(
+            "SELECT i.id, i.contenido, i.estado, i.tipo, i.created_at FROM ideas i "
+            "JOIN idea_etiqueta ie ON ie.idea_id=i.id "
+            "JOIN etiquetas e ON e.id=ie.etiqueta_id "
+            "WHERE e.nombre=? ORDER BY i.id DESC LIMIT ? OFFSET ?",
+            (normalizar_tag(tag), limit, offset),
+        ).fetchall()
+    return [_idea_desde_fila(r) for r in rows]

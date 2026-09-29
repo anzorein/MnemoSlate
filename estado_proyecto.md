@@ -74,3 +74,8 @@
 7. Transcripción de voz (Whisper local) y Syncthing (Fase 3).
 
 
+## 2026-09-28 — Sesión 6 (dev-only: micro-etiquetado, mergeado con Fase 1)
+- Nuevo `src/mnemoslate/tags.py` (stdlib): `#palabra`=tag / `#123`=solo ID; `extraer_tags()` recorta corrida final del contenido; `sugerir_parecidos()` con difflib (cutoff 0.82); `candidatas_por_texto()` como hook futuro de auto-tag (NO cableado aún).
+- `db.py`: tablas `etiquetas` + `idea_etiqueta` (UNIQUE, cascade, IF NOT EXISTS) + `etiquetar/etiquetas_de/listar/ideas_por_etiqueta`.
+- Bot: helper `_guardar_con_tags()` en `/anotar` y texto libre (reply `✅ #N · 🏷️ tags` + aviso typo); `/tags|/etiquetas` con conteos; `/tag #ID` ver, `/tag #ID #t1 #t2` asignar; `/ideas #tag` filtra (lotes temáticos). Voz fuera (transcribe Groq externo).
+- Tests `tests/test_tags.py` (extracción, IDs ignorados, fuzzy, roundtrip). Mergeado vía rebase con Fase 1/SSH.
