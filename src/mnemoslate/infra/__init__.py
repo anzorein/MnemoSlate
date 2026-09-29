@@ -6,7 +6,7 @@ Vive en la Raspberry Pi (24/7). Solo stdlib: en la Pi no hace falta instalar
     wol.py    -> Magic Packet (encender la PC)
     net.py    -> ping y espera de arranque (comprobar disponibilidad)
     power.py  -> apagado/suspensión remota por SSH (apagar cuando no se usa)
-    __main__  -> CLI de diagnóstico: `python -m mnemoslate.infra --ciclo`
+    __main__  -> CLI de diagnóstico: `python -m mnemoslate.infra --encender`
 
 requisitos de hardware (ya configurados en la PC de escritorio):
 - BIOS: `Power On By PCI-E` = Enabled, `ErP Ready` = Disabled.

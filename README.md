@@ -1,6 +1,6 @@
 # MnemoSlate
 
-Sistema distribuido de worldbuilding: captura móvil (Telegram) → Raspberry Pi 24/7 → PC pesada (OpenCode) → Syncthing.
+Sistema distribuido de worldbuilding: captura móvil (Telegram) → Raspberry Pi 24/7 → PC pesada (OpenCode) → repo de lore (Git local, sincronizado por la VPN).
 
 Esta PC es **solo desarrollo**. Producción del bot: Raspberry Pi.
 
@@ -20,24 +20,27 @@ MnemoSlate/
     develop.py            # parser /desarrollar: + combina, ,/espacio lotea, & extra
     tags.py               # #palabra=tag/#123=ID, fuzzy anti-typo, hook auto-tag futuro
     lore.py               # prompts + plantillas scribe/markdown (single-writer: la Pi)
-    sender.py             # Fase 4: cola → ciclo PC → opencode → inbox/ → notify → off
-                          # + CLI: --test (sin apagar) / --procesar
+    sender.py             # Fase 4: cola → ciclo PC → opencode → outputs/ → notify → off
+                          # + CLI: --test (autocontenido, sin apagar) / --procesar
     bot.py                # /anotar /ideas[#tag] /tags /tag /desarrollar /procesar
                           # /comandos (índice, fuente única COMANDOS) + voz
     infra/                # Fase 1: red y energía (solo stdlib, corre en la Pi)
       wol.py              # Magic Packet: normalizar MAC, armar y enviar (RF-2.2)
       net.py              # ping + espera de arranque + cálculo de broadcast (RF-2.1/2.3)
       power.py            # apagado/suspensión remota por SSH (RF-2.4)
-      __main__.py         # CLI: --info --ping --wake --wait --ciclo --shutdown
+      __main__.py         # CLI: --info --ping --wake --wait --encender --apagar
     __main__.py           # python -m mnemoslate
   data/                   # ideas.db (gitignored, RF-4.2)
-  libro_lore/             # stand-in local de Edessia/inbox/ en dev (Fase 3 Syncthing)
   tests/test_db.py tests/test_develop.py tests/test_lore.py tests/test_tags.py
      tests/test_wol.py tests/test_net.py tests/test_sender.py tests/test_bot.py
 ```
 
-Falta con hardware: e2e del sender desde la Pi, Syncthing Edessia (ver Fase 4),
-transcripción de voz (Groq externo).
+El **repo de lore** (ver "Repo de lore") es otra cosa: un repo Git local en la Pi
+(checkout con `wiki/ references/ inbox/ outputs/ scribe/`) que reemplaza a
+Syncthing para sincronizar el material entre la PC y la Pi por la VPN.
+
+Falta con hardware: e2e del sender desde la Pi (`--test`), transcripción de voz
+(Groq externo, en la backburner).
 
 ## Fase 1: Wake-on-LAN (configurar en la PC de escritorio)
 
@@ -60,22 +63,23 @@ Requisitos, todos verificables:
 ## Fase 1: probar desde la Raspberry
 
 ```bash
-python -m mnemoslate.infra --info     # muestra MAC/IP/broadcast y los IPs locales
-python -m mnemoslate.infra --ping     # RF-2.1 ¿responde?
-python -m mnemoslate.infra --wake     # RF-2.2 Magic Packet (broadcast de subred y limitado, puertos 9 y 7)
-python -m mnemoslate.infra --ciclo    # ping -> si está apagada: WoL + espera
+python -m mnemoslate.infra --info      # muestra MAC/IP/broadcast y los IPs locales
+python -m mnemoslate.infra --ping      # RF-2.1 ¿responde?
+python -m mnemoslate.infra --wake      # RF-2.2 Magic Packet (broadcast de subred y limitado, puertos 9 y 7)
+python -m mnemoslate.infra --encender  # ping -> si está apagada: WoL + espera   (alias --on)
+python -m mnemoslate.infra --apagar    # RF-2.4 apaga por SSH                    (alias --off/--shutdown)
 ```
 
 Prueba completa: `shutdown /s /t 0` en la PC (el LED del RJ45 queda encendido) y
-desde la Pi `python -m mnemoslate.infra --ciclo`. Debe arrancar en 10-60s.
+desde la Pi `python -m mnemoslate.infra --encender`. Debe arrancar en 10-60s.
 
 Códigos de salida: `0` encendida / orden enviada · `1` no respondió en el plazo
 (la idea queda *pendiente*, RNF-4) · `2` error de config o hardware.
 
 ## Fase 1: apagado remoto por SSH (RF-2.4)
 
-Para que la Pi pueda apagar la PC (`python -m mnemoslate.infra --shutdown`) hace
-falta OpenSSH Server en la PC, configurado **solo por clave**:
+Para que la Pi pueda apagar la PC (`python -m mnemoslate.infra --apagar`, alias
+`--shutdown`) hace falta OpenSSH Server en la PC, configurado **solo por clave**:
 
 **En la PC (PowerShell como Administrador):**
 ```powershell
@@ -115,14 +119,47 @@ ssh -o BatchMode=yes -i ~/.ssh/id_ed25519 <TU_USUARIO_PC>@<PC_IP> "echo CONEXION
 ```
 
 Recién cuando eso responda `CONEXION_OK`, completá `SSH_USER` y `SSH_KEY` en el
-`.env` de la Pi y probá `python3 -m mnemoslate.infra --shutdown`.
+`.env` de la Pi y probá `python3 -m mnemoslate.infra --apagar`.
 
 **Detalle de diseño:** el apagado usa `shutdown /s /t N` con `N >= 1`, no `/t 0`.
 Con retardo 0 la sesión SSH se corta antes de que el comando responda y el
 cliente ve "Connection closed", que se confunde con un fallo. `power.py` además
 distingue ese cierre abrupto (que significa "se apagó") de un error real de SSH.
 
-## Fase 4: sender (Pi → PC → inbox → Telegram → apagado)
+## Repo de lore (PC ↔ Pi, por VPN)
+
+El material de Edessia se versiona en un **repo Git local en la Pi**: no hay
+Syncthing, y la Pi solo es alcanzable por la VPN (sin puertos abiertos, RNF-3).
+
+| Carpeta | Qué va |
+|---|---|
+| `wiki/` | lore yategizado, notas largas |
+| `references/` | material de consulta: extractos, resúmenes |
+| `inbox/` | entrada cruda/manual: ideas para guardar, pedidos de brainstorming |
+| `outputs/` | **salidas de OpenCode**: Markdown de REFERENCIA (interim) |
+| `scribe/` | reservado: docs ya pulidos, listos para PDF (más adelante) |
+
+Crear el repo bare en la Pi (una sola vez):
+
+```bash
+mkdir -p ~/srv/git && git init --bare ~/srv/git/lore.git
+git clone ~/srv/git/lore.git ~/lore && cd ~/lore
+mkdir -p wiki references inbox outputs scribe
+printf '# Lore de Edessia\n' > README.md
+git add . && git commit -m "Estructura inicial del lore"
+git branch -M main && git push -u origin main
+```
+
+Desde la PC, por VPN:
+
+```bash
+git clone <usuario_pi>@<ip_pi>:/home/<usuario_pi>/srv/git/lore.git
+```
+
+`INBOX_DIR`, `OUTPUTS_DIR` y `SCRIBE_DIR` del `.env` apuntan a esas carpetas
+(por default son `inbox`, `outputs` y `scribe`, relativas a la raíz del checkout).
+
+## Fase 4: sender (Pi → PC → outputs → Telegram → apagado)
 
 Contrato Pi↔PC (`sender.py`, sin puertos públicos, RNF-3):
 
@@ -133,24 +170,33 @@ Contrato Pi↔PC (`sender.py`, sin puertos públicos, RNF-3):
 3. El prompt viaja en **archivo** (`scp payload.json` + `opencode run --format json
    --dir <EDESSIA_PC_DIR> -f payload "<instrucción corta>"`): argv de Windows
    limita a ~32k chars, el lore no entra.
-4. OpenCode devuelve **texto scribe** (ver `scribe_markdown_reference.md` en raíz);
-   solo la **Pi escribe** en `Edessia/inbox/` (single-writer: cero `.sync-conflict`).
-   La trazabilidad va oculta en `<!-- MnemoSlate | fuente: #N … -->` (scribe no
-   tiene frontmatter YAML: lo mostraría literal).
+4. OpenCode devuelve **Markdown de referencia** (encabezados y prosa, sin
+   frontmatter YAML). Solo la **Pi escribe** en `outputs/` (single-writer).
+   La trazabilidad va en `<!-- MnemoSlate | fuente: #N | fecha: … -->`.
+   El formato **scribe** (`scribe_markdown_reference.md`) queda reservado para
+   cuando el material esté pulido y se quiera pasar a `scribe/` → PDF.
 5. Ideas a `procesada`, trabajo a `hecho`, Telegram `✅` con rutas, y apagado
    **solo si el ciclo la encendió** (`APAGAR_AL_FINALIZAR=1`): una PC que ya estaba
    arriba se deja encendida (RNF-1 también al apagar). Telegram dice `💤` o `🖥️`.
    Fallos: reencola (o `error` tras `MAX_INTENTOS`) + alerta siempre.
 
-E2E seguro desde la Pi: `python -m mnemoslate.sender --test` corre el pipeline
-real **sin apagar** (avisos a stdout). `... --procesar` es el ciclo completo.
+### `--test`: e2e autocontenido
 
-E2E desde la Pi: encolar un `#test` → `/procesar` → `.md` en `inbox/` → mover a
-`outputs/` → scribe web → PDF. Supuesto a fijar en el e2e: el parseo de eventos
-`--format json` (`extraer_texto_salida()` ya tolera JSON y texto crudo).
+```bash
+python -m mnemoslate.sender --test
+```
 
-Syncthing Edessia (PC↔Pi): sincronizar todo **menos** `openspec/`,
-`Edessia-Obsidian/`, `scripts/`, `*.chronicler-cache*`, `pdfs/`, `.gemini/`.
+Corre el pipeline **real** (ping → WoL → scp → `opencode run`) pero:
+
+- usa una **DB temporal** con la idea canónica `IDEA_PRUEBA` (nunca toca `data/ideas.db`);
+- escribe en el `outputs/` real con prefijo `test-`
+  (`test-YYYY-MM-DD-escena-clases-sociales.md`);
+- **nunca apaga la PC**.
+
+`--procesar` es el ciclo completo sobre la DB real (y ahí sí vale `APAGAR_AL_FINALIZAR`).
+
+Supuesto pendiente de fijar con el e2e real: el parseo de eventos `--format json`
+(`extraer_texto_salida()` ya tolera JSON y texto crudo).
 
 ## Comandos (índice)
 
@@ -169,10 +215,13 @@ Bot (desde el celu; `/comandos` los lista, `/help` detalla):
 Pi/PC (sin `PYTHONPATH`: con el editable instalado basta el venv activo):
 
 ```bash
-python -m mnemoslate.infra --info --ping --wake --wait --ciclo --shutdown
-python -m mnemoslate.sender --test      # pipeline real sin apagar
+python -m mnemoslate.infra --info --ping --wake --wait --encender --apagar
+python -m mnemoslate.sender --test      # e2e autocontenido (DB temporal, sin apagar)
 python -m mnemoslate.sender --procesar  # pipeline real completo
 ```
+
+Alias de `infra`: `--on`/`--encender` · `--off`/`--shutdown`/`--apagar` ·
+`--suspender`.
 
 ## Uso dev (nada global: todo en `.venv`)
 

@@ -1,14 +1,16 @@
 """Generador de lore (RF-3.2 / RF-3.3). Puro stdlib, sin hardware.
 
-Dos formatos:
+Tres formatos:
 - `render_markdown()`: Markdown genérico con frontmatter (wiki, Obsidian, debug).
-- `render_scribe()` / `envolver_scribe()`: formato scribe.pf2.tools — el que viaja
-  a `Edessia/inbox/` y de ahí a `outputs/` → scribe web → PDF. Scribe NO entiende
+- `build_referencia_prompt()` / `envolver_referencia()`: Markdown de REFERENCIA,
+  que es lo que la Pi guarda hoy en `outputs/`. Trazabilidad en un comentario HTML.
+- `render_scribe()` / `envolver_scribe()`: formato scribe.pf2.tools, RESERVADO para
+  cuando el material esté pulido y se pase a `scribe/` → PDF. Scribe NO entiende
   frontmatter YAML (lo mostraría como texto): la trazabilidad va en un comentario
   HTML `<!-- -->`, que scribe oculta (ver scribe_markdown_reference.md).
 
-Flujo Fase 4: Pi enciende la PC → `build_scribe_prompt()` → `opencode run
---format json` en la PC → `envolver_scribe()` + `guardar_lore(inbox)` en la Pi.
+Flujo Fase 4: Pi enciende la PC → `build_referencia_prompt()` → `opencode run
+--format json` en la PC → `envolver_referencia()` + `guardar_lore(outputs)` en la Pi.
 
 Este módulo NO habla con la PC; solo construye los artefactos. Testeable en PC dev.
 """
@@ -41,7 +43,8 @@ def build_prompt(ideas: Sequence[Idea], extra: str = "") -> str:
     """Prompt con contexto para OpenCode (RF-3.2: coherencia con lore existente)."""
     bloques = "\n".join(f"[Idea #{i.id}] ({i.estado})\n{i.contenido}" for i in ideas)
     prompt = (
-        "Desarrollá worldbuilding coherente con el lore existente en /libro_lore.\n"
+        "Desarrollá worldbuilding coherente con el lore existente en /wiki y "
+        "/references.\n"
         "Si algo contradice el lore, avisalo y proponé resolución.\n\n"
         f"IDEAS FUENTE:\n{bloques}\n"
     )
@@ -78,18 +81,19 @@ def render_markdown(ideas: Sequence[Idea], extra: str = "",
 
 
 def guardar_lore(base_dir: Path, titulo: str, markdown: str,
-                 categoria: str | None = "general") -> Path:
-    """Escribe `<base>/<categoria>/YYYY-MM-DD-slug.md` (único, crea carpetas).
+                 categoria: str | None = "general", prefijo: str = "") -> Path:
+    """Escribe `<base>/<categoria>/<prefijo>YYYY-MM-DD-slug.md` (único, crea carpetas).
 
-    Con `categoria=None` escribe plano en `base_dir` (para `Edessia/inbox/`).
+    Con `categoria=None` escribe plano en `base_dir` (para `outputs/` o `inbox/`).
+    `prefijo` sirve para marcar pruebas (ej: `test-`).
     """
     carpeta = base_dir if categoria is None else base_dir / slugify(categoria, 40)
     carpeta.mkdir(parents=True, exist_ok=True)
     slug = slugify(titulo)
-    candidato = carpeta / f"{date.today().isoformat()}-{slug}.md"
+    candidato = carpeta / f"{prefijo}{date.today().isoformat()}-{slug}.md"
     n = 2
     while candidato.exists():
-        candidato = carpeta / f"{date.today().isoformat()}-{slug}-{n}.md"
+        candidato = carpeta / f"{prefijo}{date.today().isoformat()}-{slug}-{n}.md"
         n += 1
     candidato.write_text(markdown, encoding="utf-8")
     return candidato
@@ -150,3 +154,38 @@ def envolver_scribe(texto_opencode: str, ideas: Sequence[Idea],
                     extra: str = "") -> str:
     """Antepone trazabilidad oculta a la salida de OpenCode (single-writer: la Pi)."""
     return f"{comentario_trazabilidad(ideas, extra)}\n{texto_opencode.strip()}\n"
+
+
+# --- Markdown de REFERENCIA (interim) ---
+# La salida normal de Fase 4 NO es scribe todavía: scribe se usa recién cuando el
+# material está pulido y se quiere pasar a PDF (`scribe/`). Mientras tanto, OpenCode
+# devuelve Markdown de referencia y la Pi lo guarda en `outputs/`.
+
+def build_referencia_prompt(ideas: Sequence[Idea], extra: str = "") -> str:
+    """Prompt para OpenCode: notas de REFERENCIA en Markdown (no scribe todavía)."""
+    bloques = "\n".join(f"[Idea #{i.id}] ({i.estado})\n{i.contenido}" for i in ideas)
+    prompt = (
+        "Desarrollá worldbuilding coherente con el lore de Edessia "
+        "(carpetas references/ y wiki/). Si algo contradice el lore, marcá la "
+        "discrepancia en el texto y proponé resolución.\n\n"
+        "Formato: Markdown de REFERENCIA (interim), NO el formato scribe ni PDF. "
+        "Usá encabezados y prosa; sin frontmatter YAML.\n\n"
+        f"IDEAS FUENTE:\n{bloques}\n"
+    )
+    if extra.strip():
+        prompt += f"\nINSTRUCCIÓN ADICIONAL:\n{extra.strip()}\n"
+    return prompt
+
+
+def envolver_referencia(texto_opencode: str, ideas: Sequence[Idea],
+                        extra: str = "", nota: str = "") -> str:
+    """Antepone trazabilidad VISIBLE (un comentario HTML) al Markdown de referencia."""
+    ids = [i.id for i in ideas]
+    partes = [f"fuente: {', '.join(f'#{i}' for i in ids)}",
+              f"fecha: {date.today().isoformat()}"]
+    if nota:
+        partes.append(nota)
+    extra_uno = " ".join(extra.split())[:200]
+    if extra_uno:
+        partes.append(f"extra: {extra_uno}")
+    return f"<!-- MnemoSlate | {' | '.join(partes)} -->\n\n{texto_opencode.strip()}\n"

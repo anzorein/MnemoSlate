@@ -108,3 +108,33 @@
 - Reproducido en la PC dev creando un `.env` temporal con placeholders → `0 != 2`; con el fix, **83/83 OK tanto con `.env` como sin él**. El `.env` temporal se borró.
 - Nota de entorno: la Pi corre Python 3.11 y la suite se lanzaba con `PYTHONPATH=src`; tras Sesión 9 hay `pyproject.toml` + `pip install -e .`, así que el `PYTHONPATH` ya no es necesario en un venv.
 
+## 2026-09-29 — Sesión 11 (repo de lore + `--test` autocontenido + flags)
+- **Decisión: Syncthing FUERA, repo Git local + VPN.** El usuario no quiere instalar
+  otra app ni exponer SSH. El lore se versiona en un bare repo en la Pi
+  (`~/srv/git/lore.git`) con un checkout (`~/lore`) y layout
+  `wiki/ references/ inbox/ outputs/ scribe/`. Desvío anotado en `Requerimientos.txt` RF-4.1.
+- **Salida = `outputs/` y es Markdown de REFERENCIA, no scribe.** Scribe queda
+  reservado para `scribe/` (docs ya pulidos → PDF) más adelante. Nueva pareja en
+  `lore.py`: `build_referencia_prompt()` / `envolver_referencia()`; `envolver_scribe()`
+  y `render_scribe()` quedan intactos para esa promoción futura.
+  `guardar_lore()` gana `prefijo` (nombres `test-…`).
+- **`config.py`**: `INBOX_DIR` (default `inbox`), `OUTPUTS_DIR` (nuevo, default
+  `outputs`), `SCRIBE_DIR` (nuevo, reservado). `sender.py` escribe en `outputs_dir`.
+- **`--test` pasó a ser autocontenido**: DB temporal con `IDEA_PRUEBA` (la escena
+  de las clases sociales, ~200 palabras), **nunca toca `data/ideas.db`**, escribe en
+  el `outputs/` real con prefijo `test-` → `test-YYYY-MM-DD-escena-clases-sociales.md`,
+  y **nunca apaga la PC**. Se puede repetir sin ensuciar la DB ni el lore.
+- **Flags de `infra` renombrados** con alias compatibles: canónicos `--encender`
+  (alias `--on`) y `--apagar` (alias `--off`, `--shutdown`); `--suspender` igual;
+  `--ciclo` queda como alias legacy **oculto** (`argparse.SUPPRESS`), compartido por
+  `dest`, así que `--help` solo muestra los canónicos. Verificado: los 6 flags
+  (`--on --off --shutdown --ciclo --encender --apagar`) despachan igual.
+- Tests: `_infra()` ahora recibe la raíz y setea `inbox`+`outputs`; se asserts que los
+  `.md` caen en `outputs/`; nueva `TestReferencia`; `test_test_cola_vacia_ok` se
+  reemplaza por `test_test_autocontenido_ok` (archivo `test-*` + idea canónica en el
+  payload) y `test_ejecutar_cli_test_usa_db_temporal` (la DB real queda intacta).
+- **Suite: 86/86 OK.** README con sección "Repo de lore" (comandos exactos para crear
+  el bare y clonarlo desde la PC) y sección "Fase 4: sender" reescrita.
+- **Pendiente**: crear el bare repo en la Pi (comandos en README) y correr el primer
+  `python -m mnemoslate.sender --test` real end-to-end.
+

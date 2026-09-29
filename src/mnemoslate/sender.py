@@ -1,12 +1,13 @@
-"""Sender Fase 4: la Pi consume trabajos → PC (`opencode run`) → inbox/ → Telegram → apagado.
+"""Sender Fase 4: la Pi consume trabajos → PC (`opencode run`) → outputs/ → Telegram → apagado.
 
 Contrato Pi↔PC (ver README "Fase 4: sender"):
-1. Pi: `scp` payload.json (prompt scribe + meta) al home del usuario en la PC.
+1. Pi: `scp` payload.json (prompt de referencia + meta) al home del usuario en la PC.
 2. Pi: `ssh opencode run --format json [-m modelo] --dir <Edessia> -f payload "<instrucción>"`.
    El prompt viaja en ARCHIVO (`-f`), no en argv (Windows limita argv a ~32k chars).
 3. PC: stdout (`--format json`, o texto si algo falla) → la Pi extrae el documento.
-4. Pi (single-writer): `envolver_scribe()` + `guardar_lore(inbox)` → ideas a
+4. Pi (single-writer): `envolver_referencia()` + `guardar_lore(outputs)` → ideas a
    `procesada`, trabajo a `hecho`. OpenCode nunca escribe archivos.
+   La salida es Markdown de REFERENCIA (interim): scribe/PDF queda para más adelante.
 5. Pi notifica por Bot API y apaga la PC (RF-2.4). Si la PC no arranca, todo queda
    `pendiente`/`encolado` (RNF-4) y el usuario recibe la alerta.
 
@@ -21,6 +22,7 @@ import os
 import sqlite3
 import subprocess
 import sys
+import tempfile
 import urllib.parse
 import urllib.request
 from dataclasses import dataclass, field
@@ -30,12 +32,14 @@ from .config import InfraSettings, load_infra_settings
 from .db import (
     Trabajo,
     cambiar_estado,
+    crear_idea,
+    encolar_trabajo,
     init_db,
     marcar_trabajo,
     obtener_idea,
     reclamar_trabajo,
 )
-from .lore import build_scribe_prompt, envolver_scribe, extracto, guardar_lore
+from .lore import build_referencia_prompt, envolver_referencia, extracto, guardar_lore
 
 log = logging.getLogger("mnemoslate.sender")
 
@@ -46,6 +50,14 @@ INSTRUCCION_CORTA = (
     "Desarrolla el lore del payload adjunto en formato scribe.pf2.tools. "
     "Devuelve SOLO el documento."
 )
+
+# Idea canónica de prueba para `--test`: una escena corta, siempre igual. Vive en
+# una DB temporal, así que nunca contamina la DB real.
+IDEA_PRUEBA = (
+    "Think of a very short scene where you can note the discrepancy between "
+    "social classes in the empire. Total output must be around 200 words or less."
+)
+TITULO_PRUEBA = "escena-clases-sociales"
 
 
 class NoHayPC(RuntimeError):
@@ -183,7 +195,6 @@ def entorno_real(infra: InfraSettings, token: str, chat_id: int) -> Entorno:
         return True
 
     def enviar_payload(contenido: str, remoto: str) -> None:
-        import tempfile
         with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False,
                                          encoding="utf-8") as f:
             f.write(contenido)
@@ -237,12 +248,16 @@ def entorno_real(infra: InfraSettings, token: str, chat_id: int) -> Entorno:
 def procesar_trabajo(conn: sqlite3.Connection, infra: InfraSettings,
                      token: str, chat_id: int,
                      entorno: Entorno | None = None,
-                     forzar_sin_apagar: bool = False) -> Resultado:
+                     forzar_sin_apagar: bool = False,
+                     prefijo: str = "",
+                     titulo_forzado: str = "") -> Resultado:
     """Un ciclo completo Fase 4 para el trabajo reclamado (UN encendido, N jobs).
 
     RF-1.5: todos los jobs del trabajo se procesan en el mismo ciclo.
     La PC solo se apaga si la encendió este ciclo Y `apagar_al_finalizar` sigue
     activo (nunca se apaga una sesión ajena). `forzar_sin_apagar` = modo --test.
+    `prefijo` antepone al nombre del archivo en `outputs/` (ej: `test-`).
+    `titulo_forzado` fija el título del archivo (principalmente para `--test`).
     """
     ent = entorno or entorno_real(infra, token, chat_id)
     trabajo: Trabajo | None = reclamar_trabajo(conn, infra.claim_timeout_min)
@@ -268,7 +283,7 @@ def procesar_trabajo(conn: sqlite3.Connection, infra: InfraSettings,
                 "job": n,
                 "fuente": [i.id for i in ideas],  # type: ignore[union-attr]
                 "extra": trabajo.extra,
-                "prompt": build_scribe_prompt(ideas, trabajo.extra),  # type: ignore[arg-type]
+                "prompt": build_referencia_prompt(ideas, trabajo.extra),  # type: ignore[arg-type]
             }
             remoto = f"mnemo_payload_{trabajo.id}_{n}.json"
             ent.enviar_payload(json.dumps(payload, ensure_ascii=False), remoto)  # type: ignore[operator]
@@ -282,9 +297,12 @@ def procesar_trabajo(conn: sqlite3.Connection, infra: InfraSettings,
             texto = extraer_texto_salida(salida)
             if not texto:
                 raise ErrorEnvio(f"job {n}: `opencode run` no devolvió texto.")
-            doc = envolver_scribe(texto, ideas, trabajo.extra)  # type: ignore[arg-type]
-            titulo = extracto(ideas[0].contenido, 50) if ideas else f"trabajo-{trabajo.id}"  # type: ignore[union-attr]
-            ruta = guardar_lore(Path(infra.inbox_dir), titulo, doc, categoria=None)
+            doc = envolver_referencia(texto, ideas, trabajo.extra,  # type: ignore[arg-type]
+                                      nota=f"trabajo #{trabajo.id} job {n}")
+            titulo = titulo_forzado or (extracto(ideas[0].contenido, 50) if ideas  # type: ignore[union-attr]
+                                       else f"trabajo-{trabajo.id}")
+            ruta = guardar_lore(Path(infra.outputs_dir), titulo, doc,
+                                categoria=None, prefijo=prefijo)
             archivos.append(str(ruta))
     except ErrorEnvio as e:
         if trabajo.intentos >= infra.max_intentos:
@@ -336,16 +354,40 @@ def _todos_ids(trabajo: Trabajo) -> list[int]:
 
 
 # --- CLI: python -m mnemoslate.sender --test | --procesar (e2e desde la Pi) ---
-# --test: pipeline real SIN apagar (avisos a stdout, no hay bot acá).
-# Códigos: 0 ok (incluye cola vacía), 1 trabajo falló, 2 error de config/entorno.
+# --test: pipeline REAL autocontenido. Usa una DB temporal con la idea canónica
+#         (nunca toca la DB real) y escribe en outputs/ con prefijo `test-`.
+#         Nunca apaga la PC.
+# --procesar: un ciclo real completo sobre la DB real.
+# Códigos: 0 ok, 1 trabajo falló, 2 error de config/entorno.
 
 SALIDA_OK = 0
 SALIDA_FALLO = 1
 SALIDA_ERROR = 2
 
 
-def ejecutar_cli(modo: str, db_path: Path, root: Path | None = None) -> int:
-    """Núcleo testeable de la CLI: `modo` = --test (sin apagar) o --procesar."""
+def _probar_pipeline(infra: InfraSettings, entorno: Entorno | None = None) -> int:
+    """--test autocontenido: DB temporal + idea canónica, sin apagar la PC."""
+    with tempfile.TemporaryDirectory(prefix="mnemoslate_test_") as tmp:
+        conn = init_db(Path(tmp) / "test.db")
+        try:
+            idea_id = crear_idea(conn, 0, IDEA_PRUEBA)
+            encolar_trabajo(conn, 0, [[idea_id]], extra="")
+            ent = entorno or entorno_real(infra, "", 0)
+            ent.notificar = lambda texto: print(f"[notify] {texto}")  # type: ignore[method-assign]
+            res = procesar_trabajo(conn, infra, "", 0, ent,
+                                   forzar_sin_apagar=True, prefijo="test-",
+                                   titulo_forzado=TITULO_PRUEBA)
+        finally:
+            conn.close()
+    print(res.mensaje)
+    for a in res.archivos:
+        print(f"  {a}")
+    return SALIDA_OK if res.ok else SALIDA_FALLO
+
+
+def ejecutar_cli(modo: str, db_path: Path, root: Path | None = None,
+                 entorno: Entorno | None = None) -> int:
+    """Núcleo testeable de la CLI: `modo` = --test (autocontenido) o --procesar."""
     try:  # Windows: la consola es cp1252 y los emojis la rompen (igual que infra)
         sys.stdout.reconfigure(encoding="utf-8", errors="replace")
     except Exception:  # noqa: BLE001 - si no se puede, se sigue igual
@@ -355,18 +397,20 @@ def ejecutar_cli(modo: str, db_path: Path, root: Path | None = None) -> int:
     except RuntimeError as e:
         print(f"Config: {e}", file=sys.stderr)
         return SALIDA_ERROR
-    conn = init_db(db_path)
     try:
-        ent = entorno_real(infra, "", 0)
-        ent.notificar = lambda texto: print(f"[notify] {texto}")  # type: ignore[method-assign]
-        res = procesar_trabajo(conn, infra, "", 0, ent,
-                               forzar_sin_apagar=(modo == "--test"))
+        if modo == "--test":
+            return _probar_pipeline(infra, entorno)
+        conn = init_db(db_path)
+        try:
+            ent = entorno or entorno_real(infra, "", 0)
+            ent.notificar = lambda texto: print(f"[notify] {texto}")  # type: ignore[method-assign]
+            res = procesar_trabajo(conn, infra, "", 0, ent)
+        finally:
+            conn.close()
     except Exception as e:  # noqa: BLE001 - la CLI no muere con traceback crudo
         log.exception("Fallo inesperado")
         print(f"Error: {e}", file=sys.stderr)
         return SALIDA_ERROR
-    finally:
-        conn.close()
     print(res.mensaje)
     for a in res.archivos:
         print(f"  {a}")
@@ -374,12 +418,12 @@ def ejecutar_cli(modo: str, db_path: Path, root: Path | None = None) -> int:
 
 
 def main_cli(argv: list[str] | None = None) -> int:
-    ap = argparse.ArgumentParser(description="Sender Fase 4 (Pi -> PC -> inbox).")
+    ap = argparse.ArgumentParser(description="Sender Fase 4 (Pi -> PC -> outputs/).")
     grupo = ap.add_mutually_exclusive_group(required=True)
     grupo.add_argument("--test", dest="modo", action="store_const", const="--test",
-                       help="pipeline real sin apagar la PC")
+                       help="prueba e2e autocontenida (DB temporal, idea canónica, sin apagar)")
     grupo.add_argument("--procesar", dest="modo", action="store_const",
-                       const="--procesar", help="pipeline real completo")
+                       const="--procesar", help="pipeline real completo sobre la DB real")
     args = ap.parse_args(argv)
     logging.basicConfig(level=logging.INFO,
                         format="%(asctime)s %(name)s %(levelname)s: %(message)s")

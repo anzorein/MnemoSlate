@@ -18,16 +18,21 @@ from mnemoslate.db import (  # noqa: E402
     reclamar_trabajo,
 )
 from mnemoslate.lore import (  # noqa: E402
+    build_referencia_prompt,
     build_scribe_prompt,
+    envolver_referencia,
     envolver_scribe,
     render_scribe,
 )
 from mnemoslate.sender import (  # noqa: E402
+    IDEA_PRUEBA,
     SALIDA_ERROR,
     SALIDA_OK,
+    TITULO_PRUEBA,
     Entorno,
     ErrorEnvio,
     NoHayPC,
+    _probar_pipeline,
     comando_opencode_remoto,
     comando_scp,
     ejecutar_cli,
@@ -79,9 +84,9 @@ class Fakes:
                        self.borrar_remoto, self.apagar, self.notificar)
 
 
-def _infra(inbox, **kw):
+def _infra(root, **kw):
     base = dict(pc_mac="11:22:33:44:55:66", pc_ip="192.0.2.15",
-                inbox_dir=str(inbox))
+                inbox_dir=str(root / "inbox"), outputs_dir=str(root / "outputs"))
     base.update(kw)
     return InfraSettings(**base)
 
@@ -93,7 +98,7 @@ class TestSender(unittest.TestCase):
         self.conn = init_db(self.root / "t.db")
         self.a = crear_idea(self.conn, 1, "desierto que canta")
         self.b = crear_idea(self.conn, 1, "nomades del vidrio")
-        self.infra = _infra(self.root / "inbox")
+        self.infra = _infra(self.root)
 
     def tearDown(self):
         self.conn.close()
@@ -107,6 +112,7 @@ class TestSender(unittest.TestCase):
         self.assertEqual(len(res.archivos), 2)
         for a in res.archivos:
             self.assertTrue(Path(a).exists())
+            self.assertEqual(Path(a).parent, self.root / "outputs")
         self.assertEqual(listar_trabajos(self.conn, "hecho")[0].id, tid)
         self.assertEqual(obtener_idea(self.conn, self.a).estado, "procesada")
         self.assertEqual(f.apagados, 1)
@@ -133,7 +139,7 @@ class TestSender(unittest.TestCase):
         self.assertEqual(pendientes[0].intentos, 1)
 
     def test_opencode_agota_intentos(self):
-        infra = _infra(self.root / "inbox", max_intentos=1)
+        infra = _infra(self.root, max_intentos=1)
         tid = encolar_trabajo(self.conn, 1, [[self.a]])
         f = Fakes(opencode_ok=False)
         procesar_trabajo(self.conn, infra, "tok", 1, f.entorno())
@@ -168,7 +174,7 @@ class TestSender(unittest.TestCase):
         self.assertTrue(any("ya estaba encendida" in m for m in f.avisos))
 
     def test_flag_off_no_apaga(self):
-        infra = _infra(self.root / "inbox", apagar_al_finalizar=False)
+        infra = _infra(self.root, apagar_al_finalizar=False)
         encolar_trabajo(self.conn, 1, [[self.a]])
         f = Fakes(encendida_por_mi=True)
         res = procesar_trabajo(self.conn, infra, "tok", 1, f.entorno())
@@ -230,15 +236,56 @@ class TestScribe(unittest.TestCase):
         self.assertIn("PROHIBIDO frontmatter", p)
 
 
+class TestReferencia(unittest.TestCase):
+    def test_prompt_referencia(self):
+        p = build_referencia_prompt([], extra="hola")
+        self.assertIn("REFERENCIA", p)
+        self.assertIn("hola", p)
+
+    def test_envolver_referencia_trazabilidad(self):
+        doc = envolver_referencia("cuerpo", [], extra="x", nota="trabajo #7 job 1")
+        self.assertTrue(doc.startswith("<!--"))
+        self.assertIn("MnemoSlate | fuente:", doc)
+        self.assertIn("trabajo #7 job 1", doc)
+        self.assertTrue(doc.endswith("cuerpo\n"))
+
+
 class TestCLI(unittest.TestCase):
-    def test_test_cola_vacia_ok(self):
+    def _fakes_infra(self, root):
+        return _infra(root), Fakes()
+
+    def test_test_autocontenido_ok(self):
         tmp = tempfile.TemporaryDirectory()
-        db = Path(tmp.name) / "t.db"
-        init_db(db).close()
-        env = {"PC_MAC": "11:22:33:44:55:66", "PC_IP": "192.0.2.15"}
-        with patch.dict(os.environ, env, clear=True):
-            rc = ejecutar_cli("--test", db)
+        root = Path(tmp.name)
+        infra, f = self._fakes_infra(root)
+        rc = _probar_pipeline(infra, f.entorno())
         self.assertEqual(rc, SALIDA_OK)
+        self.assertEqual(f.apagados, 0)  # --test jamás apaga la PC
+        archivos = list((root / "outputs").glob("test-*.md"))
+        self.assertEqual(len(archivos), 1)
+        self.assertIn(TITULO_PRUEBA, archivos[0].name)
+        payload, _ = f.salidas[0]
+        self.assertIn(IDEA_PRUEBA[:30], payload)  # se usó la idea canónica
+        tmp.cleanup()
+
+    def test_ejecutar_cli_test_usa_db_temporal(self):
+        tmp = tempfile.TemporaryDirectory()
+        root = Path(tmp.name)
+        db = root / "real.db"
+        init_db(db).close()
+        env = {"PC_MAC": "11:22:33:44:55:66", "PC_IP": "192.0.2.15",
+               "OUTPUTS_DIR": str(root / "outputs")}
+        f = Fakes()
+        with patch.dict(os.environ, env, clear=True), \
+                patch("mnemoslate.config.load_dotenv"):
+            rc = ejecutar_cli("--test", db, entorno=f.entorno())
+        self.assertEqual(rc, SALIDA_OK)
+        conn = init_db(db)  # la DB real quedó intacta
+        try:
+            self.assertEqual(listar_trabajos(conn), [])
+            self.assertIsNone(obtener_idea(conn, 1))
+        finally:
+            conn.close()
         tmp.cleanup()
 
     def test_sin_config_error(self):

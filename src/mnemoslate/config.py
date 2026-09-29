@@ -38,7 +38,10 @@ class InfraSettings:
     # --- Sender Fase 4 / Edessia ---
     edessia_pc_dir: str = r"D:\Documentos\Projects\Edessia"  # --dir de opencode en la PC
     opencode_model: str = ""      # vacío = el default de la PC (provider/model)
-    inbox_dir: str = "libro_lore/inbox"  # réplica local del inbox (Syncthing)
+    # Carpetas del repo de lore (bare local + checkout; ver README "Repo de lore").
+    inbox_dir: str = "inbox"      # entrada cruda/manual (ideas, pedidos de brainstorming)
+    outputs_dir: str = "outputs"  # salidas de OpenCode: Markdown de REFERENCIA (interim)
+    scribe_dir: str = "scribe"    # reservado: docs pulidos listos para PDF (más adelante)
     claim_timeout_min: int = 30   # anti-zombi: reencolar enviados sin resultado
     max_intentos: int = 3         # pasados N intentos el trabajo va a 'error'
     apagar_al_finalizar: bool = True  # False = jamás apagar (seguro para tests)
@@ -97,7 +100,9 @@ def load_infra_settings(root: Path | None = None) -> InfraSettings:
         ssh_key=os.getenv("SSH_KEY", "").strip(),
         edessia_pc_dir=os.getenv("EDESSIA_PC_DIR", r"D:\Documentos\Projects\Edessia").strip(),
         opencode_model=os.getenv("OPENCODE_MODEL", "").strip(),
-        inbox_dir=os.getenv("INBOX_DIR", "libro_lore/inbox").strip(),
+        inbox_dir=os.getenv("INBOX_DIR", "inbox").strip(),
+        outputs_dir=os.getenv("OUTPUTS_DIR", "outputs").strip(),
+        scribe_dir=os.getenv("SCRIBE_DIR", "scribe").strip(),
         claim_timeout_min=int(os.getenv("CLAIM_TIMEOUT_MIN", "30")),
         max_intentos=int(os.getenv("MAX_INTENTOS", "3")),
         apagar_al_finalizar=os.getenv("APAGAR_AL_FINALIZAR", "1").strip().lower()

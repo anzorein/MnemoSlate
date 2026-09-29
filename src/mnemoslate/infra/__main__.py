@@ -4,15 +4,17 @@
     python -m mnemoslate.infra --ping                 # RF-2.1: ¿responde la PC?
     python -m mnemoslate.infra --wake                 # RF-2.2: manda el Magic Packet
     python -m mnemoslate.infra --wait                 # RF-2.3: espera el arranque
-    python -m mnemoslate.infra --ciclo                # ping -> si está apagada, WoL + espera
-    python -m mnemoslate.infra --shutdown             # RF-2.4: apaga la PC por SSH
+    python -m mnemoslate.infra --encender             # ping -> si está apagada, WoL + espera
+    python -m mnemoslate.infra --apagar               # RF-2.4: apaga la PC por SSH
+
+Alias: `--on` = `--encender`, `--off`/`--shutdown` = `--apagar`, `--suspender`.
 
 Códigos de salida (para usar desde scripts o tests de humo):
     0  la PC está encendida / la orden se envió
     1  la PC no respondió dentro del plazo (queda pendiente, RNF-4)
     2  error de configuración o de hardware
 
-`--ciclo` es el que automatiza el RF completo: si la PC ya está arriba no la
+`--encender` es el que automatiza el RF completo: si la PC ya está arriba no la
 toca (RNF-1); si está apagada la enciende una sola vez y espera.
 """
 from __future__ import annotations
@@ -100,7 +102,7 @@ def _wait(cfg: InfraSettings) -> int:
     return SALIDA_TIMEOUT
 
 
-def _ciclo(cfg: InfraSettings) -> int:
+def _encender(cfg: InfraSettings) -> int:
     """RF-2.1 + RF-2.2 + RF-2.3 encadenados, sin encender si ya está viva."""
     if ping(cfg.pc_ip, cfg.ping_timeout):
         print(f"🟢 {cfg.pc_ip} ya está encendida. No se toca (RNF-1).")
@@ -112,7 +114,7 @@ def _ciclo(cfg: InfraSettings) -> int:
     return _wait(cfg)
 
 
-def _shutdown(cfg: InfraSettings) -> int:
+def _apagar(cfg: InfraSettings) -> int:
     return _orden_remota(cfg, "shutdown", "apagado")
 
 
@@ -133,15 +135,24 @@ def _orden_remota(cfg: InfraSettings, accion: str, nombre: str) -> int:
     return SALIDA_OK if ok else SALIDA_ERROR
 
 
-# (flag, función, ayuda) — el orden importa: de menos a más invasivo.
+# (flag canónico, función, ayuda) — el orden importa: de menos a más invasivo.
 ACCIONES: list[tuple[str, object, str]] = [
     ("--ping", _ping, "RF-2.1: ¿responde la PC a ping?"),
     ("--wake", _wake, "RF-2.2: envía el Magic Packet (WoL)"),
     ("--wait", _wait, "RF-2.3: espera a que la PC termine de arrancar"),
-    ("--ciclo", _ciclo, "ping -> si está apagada, WoL + espera"),
-    ("--shutdown", _shutdown, "RF-2.4: apaga la PC por SSH"),
+    ("--encender", _encender, "enciende la PC (ping -> si está apagada, WoL + espera)"),
+    ("--apagar", _apagar, "RF-2.4: apaga la PC por SSH"),
     ("--suspender", _suspender, "RF-2.4: suspende la PC por SSH"),
 ]
+
+# Alias compatibles: `--on`/`--off` cortos para el celu, `--shutdown` histórico.
+# `--ciclo` queda como alias legacy OCULTO (no se documenta; nadie "cicla" un equipo).
+ALIASES: dict[str, str] = {
+    "--on": "--encender",
+    "--off": "--apagar",
+    "--shutdown": "--apagar",
+    "--ciclo": "--encender",
+}
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -153,11 +164,14 @@ def main(argv: list[str] | None = None) -> int:
 
     parser = argparse.ArgumentParser(
         prog="python -m mnemoslate.infra",
-        description="Red y energía de la PC (ping / Wake-on-LAN / apagado).",
+        description="Red y energía de la PC (ping / Wake-on-LAN / encendido / apagado).",
     )
     parser.add_argument("--info", action="store_true", help="muestra la config y sale")
     for flag, _, ayuda in ACCIONES:
-        parser.add_argument(flag, action="store_true", help=ayuda)
+        parser.add_argument(flag, action="store_true", help=ayuda, dest=flag.lstrip("-"))
+    for alias, canon in ALIASES.items():
+        parser.add_argument(alias, action="store_true", help=argparse.SUPPRESS,
+                            dest=canon.lstrip("-"))
     args = parser.parse_args(argv)
 
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s: %(message)s")

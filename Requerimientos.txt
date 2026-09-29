@@ -32,6 +32,12 @@ El objetivo es permitir la captura rápida de ideas de *worldbuilding* desde un 
 ### RF-4: Módulo de Sincronización y Persistencia (Syncthing)
 
 * **RF-4.1 (Sincronización P2P):** Mantendrá replicada la carpeta del libro (`/libro_lore`) entre la Raspberry Pi y la PC de escritorio en tiempo real.
+  > **Desvío (2026-09-29, decisión del usuario):** Syncthing se reemplaza por un
+  > **repo Git local en la Pi** (`~/srv/git/lore.git` + checkout `~/lore`) replicado
+  > por la VPN. Motivos: no instalar otra app, evitar conflictos de archivos y no
+  > exponer SSH. Se pierde el "tiempo real"; se gana historial y trazabilidad. La
+  > carpeta del libro pasa a ser `wiki/ references/ inbox/ outputs/ scribe/`.
+  > Ver README "Repo de lore".
 * **RF-4.2 (Persistencia Local en Raspy):** La Raspberry Pi mantendrá la copia local más reciente de la base de datos de ideas (JSON/SQLite) y de los archivos `.md`, asegurando acceso a la información aunque la PC esté apagada.
 
 ---
