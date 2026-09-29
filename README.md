@@ -196,7 +196,9 @@ Corre el pipeline **real** (ping → WoL → scp → `opencode run`) pero:
 `--procesar` es el ciclo completo sobre la DB real (y ahí sí vale `APAGAR_AL_FINALIZAR`).
 
 Supuesto pendiente de fijar con el e2e real: el parseo de eventos `--format json`
-(`extraer_texto_salida()` ya tolera JSON y texto crudo).
+(`extraer_texto_salida()` ya tolera JSON y texto crudo). La instrucción corta que
+viaja en argv (`INSTRUCCION_CORTA`) pide **Markdown de referencia**; no puede
+contener comillas dobles porque el comando remoto las envuelve.
 
 ## Comandos (índice)
 

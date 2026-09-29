@@ -26,6 +26,7 @@ from mnemoslate.lore import (  # noqa: E402
 )
 from mnemoslate.sender import (  # noqa: E402
     IDEA_PRUEBA,
+    INSTRUCCION_CORTA,
     SALIDA_ERROR,
     SALIDA_OK,
     TITULO_PRUEBA,
@@ -209,6 +210,19 @@ class TestSalida(unittest.TestCase):
         self.assertIn("-f", c)
         sin_modelo = comando_opencode_remoto(r"D:\Docs\Edessia", "p.json")
         self.assertNotIn("-m", sin_modelo)
+
+    def test_instruccion_pide_referencia_no_scribe(self):
+        # scribe queda reservado para scribe/ -> PDF: la instrucción de producción
+        # no debe pedirlo (evita la regresión de la Sesión 11).
+        self.assertNotIn("scribe", INSTRUCCION_CORTA.lower())
+        self.assertIn("referencia", INSTRUCCION_CORTA.lower())
+
+    def test_instruccion_no_rompe_el_comando_remoto(self):
+        # El comando remoto entrecomilla la instrucción: unas comillas dobles
+        # dentro romperían el cmd remoto.
+        self.assertNotIn('"', INSTRUCCION_CORTA)
+        self.assertIn(f'"{INSTRUCCION_CORTA}"',
+                      comando_opencode_remoto(r"D:\Docs\Edessia", "p.json"))
 
     def test_comando_scp(self):
         c = comando_scp("1.2.3.4", "u", "k", "a.json", "b.json")

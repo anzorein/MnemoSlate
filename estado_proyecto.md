@@ -138,3 +138,22 @@
 - **Pendiente**: crear el bare repo en la Pi (comandos en README) y correr el primer
   `python -m mnemoslate.sender --test` real end-to-end.
 
+## 2026-09-29 — Sesión 12 (fix de la instrucción corta antes del e2e)
+- **Bug encontrado revisando el flujo**: `INSTRUCCION_CORTA` seguía pidiendo
+  "formato scribe.pf2.tools" mientras el payload (`build_referencia_prompt`) pedía
+  Markdown de referencia. Prompt y argv se contradecían. Ahora pide explícitamente
+  Markdown de referencia, sin frontmatter, sin vallas de código y sin comentarios
+  sobre el proceso del modelo.
+- Restricción respetada: la instrucción viaja entrecomillada en el `cmd` remoto, así
+  que no puede llevar comillas dobles.
+- Tests anti-regresión: `test_instruccion_pide_referencia_no_scribe` y
+  `test_instruccion_no_rompe_el_comando_remoto`. **Suite: 88/88 OK.**
+- Confirmado que el prompt largo no viaja por stdout sino por archivo (`scp` +
+  `opencode run -f payload`), así que el límite de argv de Windows (~32k) no aplica.
+  El stdout solo trae la salida, con timeout de 600s.
+- **Decisión del usuario: seguir con Pi-writer** (la PC no escribe nada; devuelve
+  texto y la Pi es la única que arma el `.md`, actualiza la DB y avisa). La variante
+  "la PC escribe y commitea" queda descartada por ahora.
+- **Pendiente inmediato**: primer `--test` real desde la Pi. Hay que fijar el
+  formato exacto de `--format json` mirando la salida cruda.
+

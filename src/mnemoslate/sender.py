@@ -46,9 +46,13 @@ log = logging.getLogger("mnemoslate.sender")
 TIMEOUT_SSH = 15.0
 OPENCODE_TIMEOUT = 600.0
 
+# Instrucción corta que viaja en argv (el prompt largo va en el archivo `-f`).
+# Debe pedir Markdown de REFERENCIA: scribe queda reservado para `scribe/` → PDF.
+# Sin comillas dobles (el comando remoto las envuelve) y sin vallas de código.
 INSTRUCCION_CORTA = (
-    "Desarrolla el lore del payload adjunto en formato scribe.pf2.tools. "
-    "Devuelve SOLO el documento."
+    "Desarrolla el lore del prompt del payload adjunto. Devuelve SOLO el "
+    "documento final en Markdown de referencia: encabezados y prosa, sin "
+    "frontmatter (---), sin vallas de codigo y sin comentarios sobre tu proceso."
 )
 
 # Idea canónica de prueba para `--test`: una escena corta, siempre igual. Vive en
