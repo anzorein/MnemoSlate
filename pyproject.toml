@@ -1,0 +1,16 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "mnemoslate"
+version = "0.1.0"
+description = "Sistema distribuido de worldbuilding (bot + Pi + PC + Syncthing)"
+requires-python = ">=3.11"
+dependencies = []
+
+[project.optional-dependencies]
+bot = ["python-telegram-bot>=21,<23", "python-dotenv>=1.0"]
+
+[tool.setuptools.packages.find]
+where = ["src"]

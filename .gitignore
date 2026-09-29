@@ -6,5 +6,6 @@ __pycache__/
 *.pyc
 .venv/
 venv/
+*.egg-info/
 *.ogg
 *.oga

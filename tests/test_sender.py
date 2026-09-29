@@ -1,8 +1,10 @@
 """Tests del sender Fase 4 (sin hardware: Entorno fake)."""
+import os
 import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
@@ -21,11 +23,14 @@ from mnemoslate.lore import (  # noqa: E402
     render_scribe,
 )
 from mnemoslate.sender import (  # noqa: E402
+    SALIDA_ERROR,
+    SALIDA_OK,
     Entorno,
     ErrorEnvio,
     NoHayPC,
     comando_opencode_remoto,
     comando_scp,
+    ejecutar_cli,
     extraer_texto_salida,
     procesar_trabajo,
 )
@@ -35,7 +40,8 @@ JSON_OK = '{"type":"x","text":"title (Y)"}\n{"nada":[1]}\n{"content":"cuerpo"}\n
 
 
 class Fakes:
-    def __init__(self, salida=SCRIBE_OK, ciclo_ok=True, opencode_ok=True):
+    def __init__(self, salida=SCRIBE_OK, ciclo_ok=True, opencode_ok=True,
+                 encendida_por_mi=True):
         self.salidas = []
         self.borrados = []
         self.apagados = 0
@@ -43,10 +49,12 @@ class Fakes:
         self._salida = salida
         self._ciclo_ok = ciclo_ok
         self._opencode_ok = opencode_ok
+        self._encendida_por_mi = encendida_por_mi
 
     def asegurar_pc(self):
         if not self._ciclo_ok:
             raise NoHayPC("La PC no arrancó en 0s.")
+        return self._encendida_por_mi
 
     def enviar_payload(self, contenido, remoto):
         self.salidas.append((contenido, remoto))
@@ -150,6 +158,33 @@ class TestSender(unittest.TestCase):
         self.assertIn("Nada encolado", res.mensaje)
         self.assertEqual(f.apagados, 0)
 
+    def test_ya_encendida_no_apaga(self):
+        encolar_trabajo(self.conn, 1, [[self.a]])
+        f = Fakes(encendida_por_mi=False)
+        res = procesar_trabajo(self.conn, self.infra, "tok", 1, f.entorno())
+        self.assertTrue(res.ok)
+        self.assertEqual(f.apagados, 0)
+        self.assertIn("ya estaba encendida", res.mensaje)
+        self.assertTrue(any("ya estaba encendida" in m for m in f.avisos))
+
+    def test_flag_off_no_apaga(self):
+        infra = _infra(self.root / "inbox", apagar_al_finalizar=False)
+        encolar_trabajo(self.conn, 1, [[self.a]])
+        f = Fakes(encendida_por_mi=True)
+        res = procesar_trabajo(self.conn, infra, "tok", 1, f.entorno())
+        self.assertTrue(res.ok)
+        self.assertEqual(f.apagados, 0)
+        self.assertIn("APAGAR_AL_FINALIZAR=0", res.mensaje)
+
+    def test_modo_test_no_apaga(self):
+        encolar_trabajo(self.conn, 1, [[self.a]])
+        f = Fakes(encendida_por_mi=True)
+        res = procesar_trabajo(self.conn, self.infra, "tok", 1, f.entorno(),
+                               forzar_sin_apagar=True)
+        self.assertTrue(res.ok)
+        self.assertEqual(f.apagados, 0)
+        self.assertIn("modo test", res.mensaje)
+
 
 class TestSalida(unittest.TestCase):
     def test_json_lines(self):
@@ -193,6 +228,25 @@ class TestScribe(unittest.TestCase):
         p = build_scribe_prompt([], extra="")
         self.assertIn("scribe.pf2.tools", p)
         self.assertIn("PROHIBIDO frontmatter", p)
+
+
+class TestCLI(unittest.TestCase):
+    def test_test_cola_vacia_ok(self):
+        tmp = tempfile.TemporaryDirectory()
+        db = Path(tmp.name) / "t.db"
+        init_db(db).close()
+        env = {"PC_MAC": "11:22:33:44:55:66", "PC_IP": "192.0.2.15"}
+        with patch.dict(os.environ, env, clear=True):
+            rc = ejecutar_cli("--test", db)
+        self.assertEqual(rc, SALIDA_OK)
+        tmp.cleanup()
+
+    def test_sin_config_error(self):
+        tmp = tempfile.TemporaryDirectory()
+        with patch.dict(os.environ, {}, clear=True):
+            rc = ejecutar_cli("--test", Path(tmp.name) / "t.db")
+        self.assertEqual(rc, SALIDA_ERROR)
+        tmp.cleanup()
 
 
 if __name__ == "__main__":

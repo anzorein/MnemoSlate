@@ -89,3 +89,15 @@
 - `config.py` + `.env.example`: EDESSIA_PC_DIR, OPENCODE_MODEL, INBOX_DIR, CLAIM_TIMEOUT_MIN, MAX_INTENTOS.
 - Tests `tests/test_sender.py` (feliz/lote, ciclo caído, reintento, agotamiento, zombi, vacía, extractores, comandos, plantilla scribe).
 - Decisiones Edessia: inbox=`Edessia/inbox/` (outputs/ queda scribe-only); sync excluye openspec, obsidian, scripts, caches, pdfs, .gemini. Pendiente (casa): mover .md sueltos de raíz y organizar references/.
+
+## 2026-09-29 — Sesión 8 (apagado condicional + CLI --test)
+- Hueco detectado por el usuario: el sender apagaba SIEMPRE, incluso con la PC ya encendida. Ahora `asegurar_pc()->bool` registra si hizo WoL y solo apaga si la encendió ella + `APAGAR_AL_FINALIZAR=1` (nuevo en config + `.env.example`). Telegram: `💤 apagada` vs `🖥️ dejada encendida (motivo)`.
+- Nuevo CLI `python -m mnemoslate.sender --test` (pipeline real sin apagar, avisos a stdout) y `--procesar` (completo). Códigos 0/1/2. Fix cp1252→UTF-8 como en infra.
+- Tests: matriz (encendí→apaga, ya-arriba→no, flag off→no, test→no) + CLI (vacía OK, sin config error). Fakes devuelven bool.
+- Suite: 80/80 OK en `.venv` (telegram solo en venv, nada global). Sin pushear aún.
+
+## 2026-09-29 — Sesión 9 (/comandos + empaquetado + deploy Pi)
+- `bot.py`: tabla `COMANDOS` (fuente única); `/help` renderiza desde ella (se eliminó la línea stale "Fase 4 pendiente"); nuevo `/comandos|/cmd` (lista corta para el celu). `tests/test_bot.py`: tabla↔handlers en ambos sentidos (con skip si falta telegram).
+- `pyproject.toml` (setuptools src-layout, proyecto `mnemoslate`): `pip install -e .` en el venv → chau `PYTHONPATH` (README actualizado, `export` eliminados).
+- `deploy/mnemoslate.service`: plantilla systemd (venv python, EnvironmentFile=.env, Restart=always) + sección Deploy Pi en README.
+- README: tabla única "Comandos" (bot + CLIs).

@@ -52,18 +52,31 @@ from .tags import extraer_tags, normalizar_tag, sugerir_parecidos
 
 log = logging.getLogger("mnemoslate")
 
+# Fuente única de verdad: (comando primario, sintaxis, descripción).
+# /help, /comandos y tests/test_bot.py renderizan desde acá (sin drift).
+COMANDOS: list[tuple[str, str, str]] = [
+    ("anotar", "/anotar <texto> #tag", "guardar idea (alias: /idea)"),
+    ("ideas", "/ideas [#tag]", "listar últimas o filtrar (alias: /inbox)"),
+    ("tags", "/tags", "etiquetas con conteo (alias: /etiquetas)"),
+    ("tag", "/tag #ID [#t1 #t2]", "ver o asignar tags"),
+    ("desarrollar", "/desarrollar #ID [...] [& extra]", "plan de lore (alias: /lore)"),
+    ("procesar", "/procesar", "corre la cola (alias: /procesar_cola)"),
+    ("comandos", "/comandos", "esta lista (alias: /cmd)"),
+    ("start", "/start", "ayuda completa (alias: /help, /ayuda)"),
+]
+
+
+def texto_comandos() -> str:
+    """Lista corta de comandos (para /comandos desde el celu)."""
+    return "📜 *Comandos*\n\n" + "\n".join(f"`{s}` — {d}" for _, s, d in COMANDOS)
+
+
 AYUDA = (
     "📝 *MnemoSlate* — buzón de worldbuilding\n\n"
-    "`/anotar <texto> #tag` — guardar idea (alias: `/idea`)\n"
-    "`/ideas [#tag]` — listar últimas o filtrar por tag (alias: `/inbox`)\n"
-    "`/tags` — etiquetas existentes con conteo (alias: `/etiquetas`)\n"
-    "`/tag #ID` — ver tags de una idea · `/tag #ID #t1 #t2` — asignar\n"
-    "`/desarrollar #ID [...]` — plan de lore (alias: `/lore`)\n"
-    "  `#12 + #42` combina · `#40, #41` lotea · `& texto` agrega instrucción\n"
-    "`/procesar` — corre el trabajo encolado más viejo (enciende la PC)\n"
-    "`#123` es siempre ID · `#palabra` es siempre tag (se crea si no existe).\n"
-    "También podés mandarme texto directamente o una nota de voz.\n\n"
-    "Fase 4 pendiente: el plan todavía NO enciende la PC."
+    + texto_comandos()
+    + "\n  `#12 + #42` combina · `#40, #41` lotea · `& texto` agrega instrucción\n"
+    + "`#123` es siempre ID · `#palabra` es siempre tag (se crea si no existe).\n"
+    + "También podés mandarme texto directamente o una nota de voz."
 )
 
 USO_TAG = (
@@ -138,6 +151,13 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not await _solo_autorizado(update):
         return
     await update.effective_message.reply_markdown(AYUDA)  # type: ignore[union-attr]
+
+
+async def cmd_comandos(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """/comandos | /cmd — lista corta de comandos (fuente: COMANDOS)."""
+    if not await _solo_autorizado(update):
+        return
+    await update.effective_message.reply_markdown(texto_comandos())  # type: ignore[union-attr]
 
 
 async def cmd_anotar(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -366,6 +386,7 @@ def build_app(settings: Settings, infra: InfraSettings | None = None) -> "Applic
     app.bot._mnemo_allowed = settings.allowed_user_id  # type: ignore[attr-defined]
 
     app.add_handler(CommandHandler(["start", "help", "ayuda"], cmd_start))
+    app.add_handler(CommandHandler(["comandos", "cmd"], cmd_comandos))
     app.add_handler(CommandHandler(["anotar", "idea"], cmd_anotar))
     app.add_handler(CommandHandler(["ideas", "inbox"], cmd_ideas))
     app.add_handler(CommandHandler(["tags", "etiquetas"], cmd_tags))

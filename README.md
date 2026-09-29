@@ -11,8 +11,9 @@ MnemoSlate/
   Requerimientos.txt
   estado_proyecto.md      # memoria entre sesiones/PCs (ver §5 de Requerimientos)
   scribe_markdown_reference.md  # sintaxis scribe.pf2.tools (outputs/ → PDF)
-  requirements.txt
+  requirements.txt + pyproject.toml  # deps + editable (chau PYTHONPATH)
   .env.example -> .env    # BOT_TOKEN, ALLOWED_USER_ID (nunca commitear)
+  deploy/mnemoslate.service  # plantilla systemd para la Pi (Restart=always)
    src/mnemoslate/
     config.py             # lee env/.env (Settings bot + InfraSettings red/sender)
     db.py                 # SQLite: ideas + trabajos (claim/intentos) + etiquetas
@@ -20,7 +21,9 @@ MnemoSlate/
     tags.py               # #palabra=tag/#123=ID, fuzzy anti-typo, hook auto-tag futuro
     lore.py               # prompts + plantillas scribe/markdown (single-writer: la Pi)
     sender.py             # Fase 4: cola → ciclo PC → opencode → inbox/ → notify → off
-    bot.py                # /anotar /ideas[#tag] /tags /tag /desarrollar /procesar + voz
+                          # + CLI: --test (sin apagar) / --procesar
+    bot.py                # /anotar /ideas[#tag] /tags /tag /desarrollar /procesar
+                          # /comandos (índice, fuente única COMANDOS) + voz
     infra/                # Fase 1: red y energía (solo stdlib, corre en la Pi)
       wol.py              # Magic Packet: normalizar MAC, armar y enviar (RF-2.2)
       net.py              # ping + espera de arranque + cálculo de broadcast (RF-2.1/2.3)
@@ -30,7 +33,7 @@ MnemoSlate/
   data/                   # ideas.db (gitignored, RF-4.2)
   libro_lore/             # stand-in local de Edessia/inbox/ en dev (Fase 3 Syncthing)
   tests/test_db.py tests/test_develop.py tests/test_lore.py tests/test_tags.py
-     tests/test_wol.py tests/test_net.py tests/test_sender.py
+     tests/test_wol.py tests/test_net.py tests/test_sender.py tests/test_bot.py
 ```
 
 Falta con hardware: e2e del sender desde la Pi, Syncthing Edessia (ver Fase 4),
@@ -57,7 +60,6 @@ Requisitos, todos verificables:
 ## Fase 1: probar desde la Raspberry
 
 ```bash
-export PYTHONPATH=src
 python -m mnemoslate.infra --info     # muestra MAC/IP/broadcast y los IPs locales
 python -m mnemoslate.infra --ping     # RF-2.1 ¿responde?
 python -m mnemoslate.infra --wake     # RF-2.2 Magic Packet (broadcast de subred y limitado, puertos 9 y 7)
@@ -135,8 +137,13 @@ Contrato Pi↔PC (`sender.py`, sin puertos públicos, RNF-3):
    solo la **Pi escribe** en `Edessia/inbox/` (single-writer: cero `.sync-conflict`).
    La trazabilidad va oculta en `<!-- MnemoSlate | fuente: #N … -->` (scribe no
    tiene frontmatter YAML: lo mostraría literal).
-5. Ideas a `procesada`, trabajo a `hecho`, Telegram `✅` con rutas, `--shutdown`.
+5. Ideas a `procesada`, trabajo a `hecho`, Telegram `✅` con rutas, y apagado
+   **solo si el ciclo la encendió** (`APAGAR_AL_FINALIZAR=1`): una PC que ya estaba
+   arriba se deja encendida (RNF-1 también al apagar). Telegram dice `💤` o `🖥️`.
    Fallos: reencola (o `error` tras `MAX_INTENTOS`) + alerta siempre.
+
+E2E seguro desde la Pi: `python -m mnemoslate.sender --test` corre el pipeline
+real **sin apagar** (avisos a stdout). `... --procesar` es el ciclo completo.
 
 E2E desde la Pi: encolar un `#test` → `/procesar` → `.md` en `inbox/` → mover a
 `outputs/` → scribe web → PDF. Supuesto a fijar en el e2e: el parseo de eventos
@@ -145,15 +152,43 @@ E2E desde la Pi: encolar un `#test` → `/procesar` → `.md` en `inbox/` → mo
 Syncthing Edessia (PC↔Pi): sincronizar todo **menos** `openspec/`,
 `Edessia-Obsidian/`, `scripts/`, `*.chronicler-cache*`, `pdfs/`, `.gemini/`.
 
-## Uso dev (sin instalar nada global aún)
+## Comandos (índice)
+
+Bot (desde el celu; `/comandos` los lista, `/help` detalla):
+
+| Comando | Uso |
+|---|---|
+| `/anotar` (`/idea`) | `/anotar <texto> #tag` — guarda idea |
+| `/ideas` (`/inbox`) | `/ideas [#tag]` — últimas o filtro temático |
+| `/tags` (`/etiquetas`) | etiquetas existentes con conteo |
+| `/tag` | `/tag #ID` ver · `/tag #ID #t1 #t2` asignar |
+| `/desarrollar` (`/lore`) | `/desarrollar #ID [...] [& extra]` — encola plan |
+| `/procesar` | corre la cola (enciende la PC, apaga solo si la encendió) |
+| `/comandos` (`/cmd`) | esta lista · `/start` ayuda completa |
+
+Pi/PC (sin `PYTHONPATH`: con el editable instalado basta el venv activo):
+
+```bash
+python -m mnemoslate.infra --info --ping --wake --wait --ciclo --shutdown
+python -m mnemoslate.sender --test      # pipeline real sin apagar
+python -m mnemoslate.sender --procesar  # pipeline real completo
+```
+
+## Uso dev (nada global: todo en `.venv`)
 
 ```bash
 python -m venv .venv
 # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
+pip install -e .   # editable: chau PYTHONPATH para siempre
 cp .env.example .env   # completar BOT_TOKEN y ALLOWED_USER_ID
 python -m unittest discover -s tests -v
-python -m mnemoslate   # desde raíz, con src en PYTHONPATH según config IDE
+python -m mnemoslate   # desde cualquier cwd del proyecto
 ```
 
-En Raspy: `DATABASE_PATH=data/ideas.db`, `python -m mnemoslate` bajo systemd.
+## Deploy Pi (systemd, una sola vez)
+
+Ver `deploy/mnemoslate.service` (plantilla con los pasos en comentarios):
+venv + `pip install -r requirements.txt` + `pip install -e .`, `.env` completo,
+`systemctl enable --now mnemoslate`. Restart automático, logs con
+`journalctl -u mnemoslate -f`.

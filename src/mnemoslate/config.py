@@ -41,6 +41,7 @@ class InfraSettings:
     inbox_dir: str = "libro_lore/inbox"  # réplica local del inbox (Syncthing)
     claim_timeout_min: int = 30   # anti-zombi: reencolar enviados sin resultado
     max_intentos: int = 3         # pasados N intentos el trabajo va a 'error'
+    apagar_al_finalizar: bool = True  # False = jamás apagar (seguro para tests)
 
 
 def _buscar_env(root: Path | None) -> None:
@@ -99,4 +100,6 @@ def load_infra_settings(root: Path | None = None) -> InfraSettings:
         inbox_dir=os.getenv("INBOX_DIR", "libro_lore/inbox").strip(),
         claim_timeout_min=int(os.getenv("CLAIM_TIMEOUT_MIN", "30")),
         max_intentos=int(os.getenv("MAX_INTENTOS", "3")),
+        apagar_al_finalizar=os.getenv("APAGAR_AL_FINALIZAR", "1").strip().lower()
+        not in ("0", "false", "no", "off"),
     )

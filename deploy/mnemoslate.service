@@ -1,0 +1,26 @@
+# Plantilla systemd para la Raspberry Pi (MnemoSlate 24/7).
+# Instalación (una sola vez, sin exports manuales nunca más):
+#   1. git clone <repo> /home/pi/MnemoSlate && cd /home/pi/MnemoSlate
+#   2. python3 -m venv .venv && .venv/bin/pip install -r requirements.txt
+#   3. .venv/bin/pip install -e .          # adiós PYTHONPATH para siempre
+#   4. cp .env.example .env && nano .env   # BOT_TOKEN, ALLOWED_USER_ID, red, SSH
+#   5. sudo cp deploy/mnemoslate.service /etc/systemd/system/
+#      (ajustá User= y las rutas si tu usuario no es `pi`)
+#   6. sudo systemctl daemon-reload && sudo systemctl enable --now mnemoslate
+# Logs: journalctl -u mnemoslate -f
+[Unit]
+Description=MnemoSlate — bot de worldbuilding (Telegram + cola Fase 4)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=pi
+WorkingDirectory=/home/pi/MnemoSlate
+EnvironmentFile=/home/pi/MnemoSlate/.env
+ExecStart=/home/pi/MnemoSlate/.venv/bin/python -m mnemoslate
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target

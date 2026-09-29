@@ -14,19 +14,23 @@ Todo I/O vive en `Entorno` (inyectable) para testear sin hardware.
 """
 from __future__ import annotations
 
+import argparse
 import json
 import logging
+import os
 import sqlite3
 import subprocess
+import sys
 import urllib.parse
 import urllib.request
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from .config import InfraSettings
+from .config import InfraSettings, load_infra_settings
 from .db import (
     Trabajo,
     cambiar_estado,
+    init_db,
     marcar_trabajo,
     obtener_idea,
     reclamar_trabajo,
@@ -167,14 +171,16 @@ def entorno_real(infra: InfraSettings, token: str, chat_id: int) -> Entorno:
     from .infra.power import apagar_pc
     from .infra.wol import enviar_multiples
 
-    def asegurar_pc() -> None:
+    def asegurar_pc() -> bool:
+        """True si la encendió ella (hay que apagarla); False si ya estaba arriba."""
         if ping(infra.pc_ip, timeout=infra.ping_timeout):
-            return  # ya arriba: no se toca (RNF-1)
+            return False  # ya arriba: no se toca (RNF-1) y no se apaga después
         broadcast = infra.pc_broadcast or broadcast_de(infra.pc_ip)
         enviar_multiples(infra.pc_mac, broadcast)
         if not esperar_activa(infra.pc_ip, timeout=infra.wake_timeout,
                               intervalo=infra.ping_timeout):
             raise NoHayPC(f"La PC no arrancó en {infra.wake_timeout}s.")
+        return True
 
     def enviar_payload(contenido: str, remoto: str) -> None:
         import tempfile
@@ -230,10 +236,13 @@ def entorno_real(infra: InfraSettings, token: str, chat_id: int) -> Entorno:
 
 def procesar_trabajo(conn: sqlite3.Connection, infra: InfraSettings,
                      token: str, chat_id: int,
-                     entorno: Entorno | None = None) -> Resultado:
+                     entorno: Entorno | None = None,
+                     forzar_sin_apagar: bool = False) -> Resultado:
     """Un ciclo completo Fase 4 para el trabajo reclamado (UN encendido, N jobs).
 
     RF-1.5: todos los jobs del trabajo se procesan en el mismo ciclo.
+    La PC solo se apaga si la encendió este ciclo Y `apagar_al_finalizar` sigue
+    activo (nunca se apaga una sesión ajena). `forzar_sin_apagar` = modo --test.
     """
     ent = entorno or entorno_real(infra, token, chat_id)
     trabajo: Trabajo | None = reclamar_trabajo(conn, infra.claim_timeout_min)
@@ -241,7 +250,7 @@ def procesar_trabajo(conn: sqlite3.Connection, infra: InfraSettings,
         return Resultado(0, True, "📭 Nada encolado.")
 
     try:
-        ent.asegurar_pc()  # type: ignore[operator]
+        la_encendi: bool = bool(ent.asegurar_pc())  # type: ignore[operator]
     except NoHayPC as e:
         # Queda 'enviado' con claim fresco: el timeout lo libera (anti-zombi).
         ent.notificar(f"⚠️ Trabajo #{trabajo.id}: {e} Las ideas siguen pendientes.")  # type: ignore[operator]
@@ -291,12 +300,29 @@ def procesar_trabajo(conn: sqlite3.Connection, infra: InfraSettings,
     marcar_trabajo(conn, trabajo.id, "hecho")
     detalle = "\n".join(f"• `{a}`" for a in archivos)
     ent.notificar(f"✅ Trabajo #{trabajo.id} completado:\n{detalle}")  # type: ignore[operator]
+    if forzar_sin_apagar:
+        motivo = "modo test: sin apagar"
+    elif not la_encendi:
+        motivo = "ya estaba encendida"
+    elif not infra.apagar_al_finalizar:
+        motivo = "APAGAR_AL_FINALIZAR=0"
+    else:
+        motivo = ""
+    if motivo:
+        ent.notificar(f"🖥️ Trabajo #{trabajo.id} listo. PC dejada encendida ({motivo}).")  # type: ignore[operator]
+        return Resultado(trabajo.id, True,
+                         f"✅ Trabajo #{trabajo.id}: {len(archivos)} archivo(s). PC encendida ({motivo}).",
+                         archivos)
     try:
         ent.apagar()  # type: ignore[operator]
     except Exception as e:  # noqa: BLE001 - el trabajo ya está hecho; avisar basta
         log.warning("No se pudo apagar la PC: %s", e)
         ent.notificar(f"⚠️ Trabajo #{trabajo.id} listo pero no pude apagar la PC: {e}")  # type: ignore[operator]
-    return Resultado(trabajo.id, True, f"✅ Trabajo #{trabajo.id}: {len(archivos)} archivo(s).",
+        return Resultado(trabajo.id, True,
+                         f"✅ Trabajo #{trabajo.id}: {len(archivos)} archivo(s). PC encendida (falló el apagado).",
+                         archivos)
+    ent.notificar(f"💤 Trabajo #{trabajo.id} listo. PC apagada.")  # type: ignore[operator]
+    return Resultado(trabajo.id, True, f"✅ Trabajo #{trabajo.id}: {len(archivos)} archivo(s). PC apagada.",
                      archivos)
 
 
@@ -307,3 +333,58 @@ def _todos_ids(trabajo: Trabajo) -> list[int]:
             if i not in vistos:
                 vistos.append(i)
     return vistos
+
+
+# --- CLI: python -m mnemoslate.sender --test | --procesar (e2e desde la Pi) ---
+# --test: pipeline real SIN apagar (avisos a stdout, no hay bot acá).
+# Códigos: 0 ok (incluye cola vacía), 1 trabajo falló, 2 error de config/entorno.
+
+SALIDA_OK = 0
+SALIDA_FALLO = 1
+SALIDA_ERROR = 2
+
+
+def ejecutar_cli(modo: str, db_path: Path, root: Path | None = None) -> int:
+    """Núcleo testeable de la CLI: `modo` = --test (sin apagar) o --procesar."""
+    try:  # Windows: la consola es cp1252 y los emojis la rompen (igual que infra)
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:  # noqa: BLE001 - si no se puede, se sigue igual
+        pass
+    try:
+        infra = load_infra_settings(root)
+    except RuntimeError as e:
+        print(f"Config: {e}", file=sys.stderr)
+        return SALIDA_ERROR
+    conn = init_db(db_path)
+    try:
+        ent = entorno_real(infra, "", 0)
+        ent.notificar = lambda texto: print(f"[notify] {texto}")  # type: ignore[method-assign]
+        res = procesar_trabajo(conn, infra, "", 0, ent,
+                               forzar_sin_apagar=(modo == "--test"))
+    except Exception as e:  # noqa: BLE001 - la CLI no muere con traceback crudo
+        log.exception("Fallo inesperado")
+        print(f"Error: {e}", file=sys.stderr)
+        return SALIDA_ERROR
+    finally:
+        conn.close()
+    print(res.mensaje)
+    for a in res.archivos:
+        print(f"  {a}")
+    return SALIDA_OK if res.ok else SALIDA_FALLO
+
+
+def main_cli(argv: list[str] | None = None) -> int:
+    ap = argparse.ArgumentParser(description="Sender Fase 4 (Pi -> PC -> inbox).")
+    grupo = ap.add_mutually_exclusive_group(required=True)
+    grupo.add_argument("--test", dest="modo", action="store_const", const="--test",
+                       help="pipeline real sin apagar la PC")
+    grupo.add_argument("--procesar", dest="modo", action="store_const",
+                       const="--procesar", help="pipeline real completo")
+    args = ap.parse_args(argv)
+    logging.basicConfig(level=logging.INFO,
+                        format="%(asctime)s %(name)s %(levelname)s: %(message)s")
+    return ejecutar_cli(args.modo, Path(os.getenv("DATABASE_PATH", "data/ideas.db")))
+
+
+if __name__ == "__main__":
+    raise SystemExit(main_cli())
