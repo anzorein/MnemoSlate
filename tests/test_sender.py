@@ -227,7 +227,7 @@ class TestSalida(unittest.TestCase):
         # Regresión: `opencode run` resuelve `-f` con path.resolve(--dir ?? root, ruta).
         # El payload lo deja `scp` en el home, así que un nombre pelado no se
         # encuentra y el e2e moría con "File not found".
-        c = comando_opencode_remoto(r"D:\Docs\lore", "mnemo_payload_1_1.json")
+        c = comando_opencode_remoto(r"D:\Documentos\Projects\Edessia", "mnemo_payload_1_1.json")
         self.assertIn(r'-f "%USERPROFILE%\mnemo_payload_1_1.json"', c)
         # y el nombre pelado NO debe aparecer suelto (sería relativo al --dir)
         self.assertNotIn("-f mnemo_payload_1_1.json", c)
