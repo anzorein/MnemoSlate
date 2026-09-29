@@ -1,8 +1,14 @@
-"""Generador de lore .md (RF-3.2 / RF-3.3). Puro stdlib, sin hardware.
+"""Generador de lore (RF-3.2 / RF-3.3). Puro stdlib, sin hardware.
 
-Flujo Fase 4 (futuro): Raspy enciende la PC → toma un `trabajo` encolado →
-`build_prompt()` genera el prompt con contexto → OpenCode responde → `render_markdown()`
-arma el .md con trazabilidad → `guardar_lore()` lo escribe en `libro_lore/`.
+Dos formatos:
+- `render_markdown()`: Markdown genérico con frontmatter (wiki, Obsidian, debug).
+- `render_scribe()` / `envolver_scribe()`: formato scribe.pf2.tools — el que viaja
+  a `Edessia/inbox/` y de ahí a `outputs/` → scribe web → PDF. Scribe NO entiende
+  frontmatter YAML (lo mostraría como texto): la trazabilidad va en un comentario
+  HTML `<!-- -->`, que scribe oculta (ver scribe_markdown_reference.md).
+
+Flujo Fase 4: Pi enciende la PC → `build_scribe_prompt()` → `opencode run
+--format json` en la PC → `envolver_scribe()` + `guardar_lore(inbox)` en la Pi.
 
 Este módulo NO habla con la PC; solo construye los artefactos. Testeable en PC dev.
 """
@@ -72,9 +78,12 @@ def render_markdown(ideas: Sequence[Idea], extra: str = "",
 
 
 def guardar_lore(base_dir: Path, titulo: str, markdown: str,
-                 categoria: str = "general") -> Path:
-    """Escribe `libro_lore/<categoria>/YYYY-MM-DD-slug.md` (único, crea carpetas)."""
-    carpeta = base_dir / slugify(categoria, 40)
+                 categoria: str | None = "general") -> Path:
+    """Escribe `<base>/<categoria>/YYYY-MM-DD-slug.md` (único, crea carpetas).
+
+    Con `categoria=None` escribe plano en `base_dir` (para `Edessia/inbox/`).
+    """
+    carpeta = base_dir if categoria is None else base_dir / slugify(categoria, 40)
     carpeta.mkdir(parents=True, exist_ok=True)
     slug = slugify(titulo)
     candidato = carpeta / f"{date.today().isoformat()}-{slug}.md"
@@ -84,3 +93,60 @@ def guardar_lore(base_dir: Path, titulo: str, markdown: str,
         n += 1
     candidato.write_text(markdown, encoding="utf-8")
     return candidato
+
+
+# --- Formato scribe.pf2.tools (resumen de scribe_markdown_reference.md) ---
+
+GUIA_SCRIBE = """Sintaxis scribe.pf2.tools (usala tal cual):
+- `title (T)` y encabezado `# T ((T))`: ((...)) registra la entrada en el índice.
+- `## X ((+X))`: sección con entrada de índice (+ más indentado, ++ más aún).
+- Cajas: `head (...)`, `info (...)`, `note (...)`, `item (...)`, `rules (...)`.
+- Columnas: `|` abre, `/` cierra. Página nueva: `=` en su línea. `-` separador.
+- `%` en su línea oculta todo lo que sigue. `<!-- ... -->` también se oculta.
+- PROHIBIDO frontmatter YAML (---): scribe lo muestra como texto literal.
+Devolvé SOLO el documento scribe, sin explicaciones fuera de él."""
+
+
+def build_scribe_prompt(ideas: Sequence[Idea], extra: str = "") -> str:
+    """Prompt para OpenCode con guía scribe + ideas fuente (RF-3.2)."""
+    bloques = "\n".join(f"[Idea #{i.id}] ({i.estado})\n{i.contenido}" for i in ideas)
+    prompt = (
+        "Desarrollá worldbuilding coherente con el lore de Edessia "
+        "(carpetas references/ y wiki/). Si algo contradice el lore, avisalo "
+        "dentro del documento en una caja note (...) y proponé resolución.\n\n"
+        f"IDEAS FUENTE:\n{bloques}\n"
+    )
+    if extra.strip():
+        prompt += f"\nINSTRUCCIÓN ADICIONAL:\n{extra.strip()}\n"
+    return prompt + "\n" + GUIA_SCRIBE
+
+
+def comentario_trazabilidad(ideas: Sequence[Idea], extra: str = "") -> str:
+    """Trazabilidad oculta para scribe (RF-3.3: Fuente #N sin romper el formato)."""
+    ids = [i.id for i in ideas]
+    fuentes = ", ".join(f"#{i}" for i in ids)
+    extra_una_linea = " ".join(extra.split())[:200]
+    return (
+        "<!--\n"
+        f"MnemoSlate | fuente: {fuentes} | fecha: {date.today().isoformat()} | "
+        f"extra: {extra_una_linea}\n-->"
+    )
+
+
+def render_scribe(ideas: Sequence[Idea], extra: str = "",
+                  titulo: str = "Borrador") -> str:
+    """Esqueleto scribe con trazabilidad oculta (para inbox/ → outputs/)."""
+    return (
+        f"{comentario_trazabilidad(ideas, extra)}\n"
+        f"title ({titulo})\n"
+        f"# {titulo} (({titulo}))\n\n"
+        "## Resumen ((+Resumen))\n\n[OpenCode completa]\n\n"
+        "## Desarrollo ((+Desarrollo))\n\n[OpenCode completa]\n\n"
+        "note (\n# Ganchos ((+Ganchos))\n\n[OpenCode completa]\n)\n"
+    )
+
+
+def envolver_scribe(texto_opencode: str, ideas: Sequence[Idea],
+                    extra: str = "") -> str:
+    """Antepone trazabilidad oculta a la salida de OpenCode (single-writer: la Pi)."""
+    return f"{comentario_trazabilidad(ideas, extra)}\n{texto_opencode.strip()}\n"

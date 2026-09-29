@@ -19,6 +19,7 @@ Ejecución en Raspberry:
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 import sqlite3
 from pathlib import Path
@@ -32,7 +33,7 @@ from telegram.ext import (
     filters,
 )
 
-from .config import Settings, load_settings
+from .config import InfraSettings, Settings, load_infra_settings, load_settings
 from .db import (
     crear_idea,
     encolar_trabajo,
@@ -46,6 +47,7 @@ from .db import (
     obtener_idea,
 )
 from .develop import USO, ParseError, formatear_plan, parse_desarrollar
+from .sender import procesar_trabajo
 from .tags import extraer_tags, normalizar_tag, sugerir_parecidos
 
 log = logging.getLogger("mnemoslate")
@@ -58,6 +60,7 @@ AYUDA = (
     "`/tag #ID` — ver tags de una idea · `/tag #ID #t1 #t2` — asignar\n"
     "`/desarrollar #ID [...]` — plan de lore (alias: `/lore`)\n"
     "  `#12 + #42` combina · `#40, #41` lotea · `& texto` agrega instrucción\n"
+    "`/procesar` — corre el trabajo encolado más viejo (enciende la PC)\n"
     "`#123` es siempre ID · `#palabra` es siempre tag (se crea si no existe).\n"
     "También podés mandarme texto directamente o una nota de voz.\n\n"
     "Fase 4 pendiente: el plan todavía NO enciende la PC."
@@ -294,6 +297,32 @@ async def cmd_desarrollar(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     )
 
 
+async def cmd_procesar(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """/procesar — Fase 4: un ciclo PC para el trabajo encolado más viejo.
+
+    Corre en thread aparte (asyncio.to_thread) para no bloquear el event loop:
+    el ciclo tarda minutos (WoL + opencode + apagado).
+    """
+    if not await _solo_autorizado(update):
+        return
+    infra: InfraSettings | None = context.application.bot_data.get("infra")
+    if infra is None or not infra.ssh_user:
+        await update.effective_message.reply_text(  # type: ignore[union-attr]
+            "⚠️ Fase 4 no configurada: falta `SSH_USER`/`SSH_KEY` en el `.env` de la Pi."
+        )
+        return
+    st: Settings = _settings(context)
+    await update.effective_message.reply_text(  # type: ignore[union-attr]
+        "⏳ Procesando cola (enciendo la PC si hace falta)…"
+    )
+    res = await asyncio.to_thread(
+        procesar_trabajo, _conn(context), infra, st.bot_token, st.allowed_user_id
+    )
+    await update.effective_message.reply_text(  # type: ignore[union-attr]
+        res.mensaje
+    )
+
+
 async def on_texto_libre(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Texto sin comando en privado = anotación directa (captura rápida móvil)."""
     if not await _solo_autorizado(update):
@@ -328,11 +357,12 @@ async def on_error(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
     log.exception("Error en handler", exc_info=context.error)
 
 
-def build_app(settings: Settings) -> "ApplicationBuilder":
+def build_app(settings: Settings, infra: InfraSettings | None = None) -> "ApplicationBuilder":
     conn = init_db(settings.database_path)
     app = ApplicationBuilder().token(settings.bot_token).build()
     app.bot_data["conn"] = conn
     app.bot_data["settings"] = settings
+    app.bot_data["infra"] = infra
     app.bot._mnemo_allowed = settings.allowed_user_id  # type: ignore[attr-defined]
 
     app.add_handler(CommandHandler(["start", "help", "ayuda"], cmd_start))
@@ -341,6 +371,7 @@ def build_app(settings: Settings) -> "ApplicationBuilder":
     app.add_handler(CommandHandler(["tags", "etiquetas"], cmd_tags))
     app.add_handler(CommandHandler("tag", cmd_tag))
     app.add_handler(CommandHandler(["desarrollar", "lore"], cmd_desarrollar))
+    app.add_handler(CommandHandler(["procesar", "procesar_cola"], cmd_procesar))
     app.add_handler(MessageHandler(filters.VOICE, on_voz))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, on_texto_libre))
     app.add_error_handler(on_error)
@@ -353,8 +384,13 @@ def main() -> None:
         level=getattr(logging, settings.log_level, logging.INFO),
         format="%(asctime)s %(name)s %(levelname)s: %(message)s",
     )
+    try:
+        infra = load_infra_settings(Path(__file__).resolve().parents[2])
+    except RuntimeError as e:
+        log.warning("Sin config Fase 1/4 (%s): /procesar deshabilitado.", e)
+        infra = None
     log.info("DB en %s | usuario permitido=%s", settings.database_path, settings.allowed_user_id)
-    build_app(settings).run_polling(allowed_updates=Update.ALL_TYPES)
+    build_app(settings, infra).run_polling(allowed_updates=Update.ALL_TYPES)
 
 
 if __name__ == "__main__":

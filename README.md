@@ -4,21 +4,23 @@ Sistema distribuido de worldbuilding: captura móvil (Telegram) → Raspberry Pi
 
 Esta PC es **solo desarrollo**. Producción del bot: Raspberry Pi.
 
-## Estructura (Fase 2)
+## Estructura
 
 ```
 MnemoSlate/
   Requerimientos.txt
   estado_proyecto.md      # memoria entre sesiones/PCs (ver §5 de Requerimientos)
+  scribe_markdown_reference.md  # sintaxis scribe.pf2.tools (outputs/ → PDF)
   requirements.txt
   .env.example -> .env    # BOT_TOKEN, ALLOWED_USER_ID (nunca commitear)
    src/mnemoslate/
-    config.py             # lee env/.env (Settings del bot + InfraSettings de red)
-    db.py                 # SQLite: ideas + trabajos + etiquetas
+    config.py             # lee env/.env (Settings bot + InfraSettings red/sender)
+    db.py                 # SQLite: ideas + trabajos (claim/intentos) + etiquetas
     develop.py            # parser /desarrollar: + combina, ,/espacio lotea, & extra
     tags.py               # #palabra=tag/#123=ID, fuzzy anti-typo, hook auto-tag futuro
-    lore.py               # prompt OpenCode + .md con frontmatter Fuente #IDs (sin hardware)
-    bot.py                # /anotar /ideas[#tag] /tags /tag /desarrollar + voz + texto libre
+    lore.py               # prompts + plantillas scribe/markdown (single-writer: la Pi)
+    sender.py             # Fase 4: cola → ciclo PC → opencode → inbox/ → notify → off
+    bot.py                # /anotar /ideas[#tag] /tags /tag /desarrollar /procesar + voz
     infra/                # Fase 1: red y energía (solo stdlib, corre en la Pi)
       wol.py              # Magic Packet: normalizar MAC, armar y enviar (RF-2.2)
       net.py              # ping + espera de arranque + cálculo de broadcast (RF-2.1/2.3)
@@ -26,13 +28,13 @@ MnemoSlate/
       __main__.py         # CLI: --info --ping --wake --wait --ciclo --shutdown
     __main__.py           # python -m mnemoslate
   data/                   # ideas.db (gitignored, RF-4.2)
-  libro_lore/             # .md por categoria (Fase 3 Syncthing)
+  libro_lore/             # stand-in local de Edessia/inbox/ en dev (Fase 3 Syncthing)
   tests/test_db.py tests/test_develop.py tests/test_lore.py tests/test_tags.py
-     tests/test_wol.py tests/test_net.py
+     tests/test_wol.py tests/test_net.py tests/test_sender.py
 ```
 
-Falta: conector de la cola hacia OpenCode (Fase 4, SSH/API), transcripción de voz,
-Syncthing (Fase 3).
+Falta con hardware: e2e del sender desde la Pi, Syncthing Edessia (ver Fase 4),
+transcripción de voz (Groq externo).
 
 ## Fase 1: Wake-on-LAN (configurar en la PC de escritorio)
 
@@ -117,6 +119,31 @@ Recién cuando eso responda `CONEXION_OK`, completá `SSH_USER` y `SSH_KEY` en e
 Con retardo 0 la sesión SSH se corta antes de que el comando responda y el
 cliente ve "Connection closed", que se confunde con un fallo. `power.py` además
 distingue ese cierre abrupto (que significa "se apagó") de un error real de SSH.
+
+## Fase 4: sender (Pi → PC → inbox → Telegram → apagado)
+
+Contrato Pi↔PC (`sender.py`, sin puertos públicos, RNF-3):
+
+1. `/desarrollar` encola; `/procesar` reclama el trabajo más viejo (o un `enviado`
+   expirado: anti-zombi por `CLAIM_TIMEOUT_MIN`).
+2. Ciclo `infra` (ping→WoL→wait). Si la PC no arranca: todo queda pendiente y
+   Telegram avisa (RNF-4). La PC nunca se toca si ya está arriba (RNF-1).
+3. El prompt viaja en **archivo** (`scp payload.json` + `opencode run --format json
+   --dir <EDESSIA_PC_DIR> -f payload "<instrucción corta>"`): argv de Windows
+   limita a ~32k chars, el lore no entra.
+4. OpenCode devuelve **texto scribe** (ver `scribe_markdown_reference.md` en raíz);
+   solo la **Pi escribe** en `Edessia/inbox/` (single-writer: cero `.sync-conflict`).
+   La trazabilidad va oculta en `<!-- MnemoSlate | fuente: #N … -->` (scribe no
+   tiene frontmatter YAML: lo mostraría literal).
+5. Ideas a `procesada`, trabajo a `hecho`, Telegram `✅` con rutas, `--shutdown`.
+   Fallos: reencola (o `error` tras `MAX_INTENTOS`) + alerta siempre.
+
+E2E desde la Pi: encolar un `#test` → `/procesar` → `.md` en `inbox/` → mover a
+`outputs/` → scribe web → PDF. Supuesto a fijar en el e2e: el parseo de eventos
+`--format json` (`extraer_texto_salida()` ya tolera JSON y texto crudo).
+
+Syncthing Edessia (PC↔Pi): sincronizar todo **menos** `openspec/`,
+`Edessia-Obsidian/`, `scripts/`, `*.chronicler-cache*`, `pdfs/`, `.gemini/`.
 
 ## Uso dev (sin instalar nada global aún)
 

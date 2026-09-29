@@ -79,3 +79,13 @@
 - `db.py`: tablas `etiquetas` + `idea_etiqueta` (UNIQUE, cascade, IF NOT EXISTS) + `etiquetar/etiquetas_de/listar/ideas_por_etiqueta`.
 - Bot: helper `_guardar_con_tags()` en `/anotar` y texto libre (reply `✅ #N · 🏷️ tags` + aviso typo); `/tags|/etiquetas` con conteos; `/tag #ID` ver, `/tag #ID #t1 #t2` asignar; `/ideas #tag` filtra (lotes temáticos). Voz fuera (transcribe Groq externo).
 - Tests `tests/test_tags.py` (extracción, IDs ignorados, fuzzy, roundtrip). Mergeado vía rebase con Fase 1/SSH.
+
+## 2026-09-29 — Sesión 7 (sender Fase 4 + scribe, dev-only con mocks)
+- Ingerido `scribe_markdown_reference.md` (498 líneas, en raíz del repo): scribe usa bloques `title/head/info/note/item`, TOC con `((etiquetas))`, `|`/`/` columnas, `=` página, `%` y `<!-- -->` ocultos. **Sin frontmatter YAML** (lo mostraría literal).
+- `lore.py`: `GUIA_SCRIBE` (cheat-sheet para el prompt), `build_scribe_prompt()`, `render_scribe()` (esqueleto con TOC), `envolver_scribe()` (antepone `<!-- MnemoSlate | fuente: #N … -->` oculto), `guardar_lore(..., categoria=None)` escribe plano (para `Edessia/inbox/`).
+- `db.py`: `claimed_at`+`intentos` (migración en `init_db`), `reclamar_trabajo()` (toma encolado o enviado expirado), `reencolar_expirados()` (anti-zombi).
+- Nuevo `sender.py` (stdlib): `procesar_trabajo()` — reclaim → ciclo infra → scp payload → `opencode run --format json --dir Edessia -f payload` (prompt en archivo, no argv: límite 32k en Windows) → inbox/ → ideas `procesada`, trabajo `hecho` → Telegram `✅` → `--shutdown`. Fallos: reencola o `error` tras MAX_INTENTOS, alerta siempre. `Entorno` inyectable.
+- Bot `/procesar|/procesar_cola` vía `asyncio.to_thread` (no bloquea el loop); sin infra SSH configurada avisa.
+- `config.py` + `.env.example`: EDESSIA_PC_DIR, OPENCODE_MODEL, INBOX_DIR, CLAIM_TIMEOUT_MIN, MAX_INTENTOS.
+- Tests `tests/test_sender.py` (feliz/lote, ciclo caído, reintento, agotamiento, zombi, vacía, extractores, comandos, plantilla scribe).
+- Decisiones Edessia: inbox=`Edessia/inbox/` (outputs/ queda scribe-only); sync excluye openspec, obsidian, scripts, caches, pdfs, .gemini. Pendiente (casa): mover .md sueltos de raíz y organizar references/.

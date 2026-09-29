@@ -112,7 +112,17 @@ def init_db(db_path: Path) -> sqlite3.Connection:
     conn = connect(db_path)
     with _lock, conn:
         conn.executescript(SCHEMA)
+        _migrar_trabajos(conn)
     return conn
+
+
+def _migrar_trabajos(conn: sqlite3.Connection) -> None:
+    """Agrega claimed_at/intentos a DBs creadas antes de la sesión 7 (anti-zombi)."""
+    cols = {r["name"] for r in conn.execute("PRAGMA table_info(trabajos)").fetchall()}
+    if "claimed_at" not in cols:
+        conn.execute("ALTER TABLE trabajos ADD COLUMN claimed_at TEXT")
+    if "intentos" not in cols:
+        conn.execute("ALTER TABLE trabajos ADD COLUMN intentos INTEGER NOT NULL DEFAULT 0")
 
 
 def crear_idea(conn: sqlite3.Connection, user_id: int, contenido: str,
@@ -189,6 +199,8 @@ class Trabajo:
     extra: str
     estado: str
     created_at: str
+    intentos: int = 0
+    claimed_at: str = ""
 
 
 def encolar_trabajo(conn: sqlite3.Connection, user_id: int,
@@ -206,7 +218,7 @@ def encolar_trabajo(conn: sqlite3.Connection, user_id: int,
 
 def listar_trabajos(conn: sqlite3.Connection, estado: str | None = None,
                     limit: int = 20) -> list[Trabajo]:
-    q = "SELECT id, jobs_json, extra, estado, created_at FROM trabajos"
+    q = "SELECT id, jobs_json, extra, estado, created_at, intentos, claimed_at FROM trabajos"
     params: list = []
     if estado:
         if estado not in ESTADOS_TRABAJO:
@@ -218,7 +230,52 @@ def listar_trabajos(conn: sqlite3.Connection, estado: str | None = None,
     with _lock:
         rows = conn.execute(q, params).fetchall()
     return [Trabajo(r["id"], json.loads(r["jobs_json"]), r["extra"],
-                    r["estado"], r["created_at"]) for r in rows]
+                    r["estado"], r["created_at"],
+                    r["intentos"] or 0, r["claimed_at"] or "") for r in rows]
+
+
+def reclamar_trabajo(conn: sqlite3.Connection, timeout_min: int = 30) -> Trabajo | None:
+    """Toma el encolado más viejo (o un enviado expirado = zombi) y lo marca enviado.
+
+    Suma un intento y sella claimed_at. Devuelve None si no hay nada reclamable.
+    """
+    from datetime import datetime, timedelta, timezone
+
+    corte = (datetime.now(timezone.utc) - timedelta(minutes=timeout_min))
+    corte_txt = corte.strftime("%Y-%m-%dT%H:%M:%f")[:-3] + "Z"
+    with _lock, conn:
+        r = conn.execute(
+            "SELECT id, jobs_json, extra, estado, created_at, intentos, claimed_at"
+            " FROM trabajos WHERE estado='encolado'"
+            " OR (estado='enviado' AND (claimed_at IS NULL OR claimed_at < ?))"
+            " ORDER BY id ASC LIMIT 1",
+            (corte_txt,),
+        ).fetchone()
+        if r is None:
+            return None
+        conn.execute(
+            "UPDATE trabajos SET estado='enviado',"
+            " claimed_at=strftime('%Y-%m-%dT%H:%M:%fZ','now'), intentos=intentos+1"
+            " WHERE id=?",
+            (r["id"],),
+        )
+        return Trabajo(r["id"], json.loads(r["jobs_json"]), r["extra"], "enviado",
+                       r["created_at"], (r["intentos"] or 0) + 1, "")
+
+
+def reencolar_expirados(conn: sqlite3.Connection, timeout_min: int = 30) -> int:
+    """Devuelve a encolado los enviados sin resultado tras el timeout. Retorna cuántos."""
+    from datetime import datetime, timedelta, timezone
+
+    corte = (datetime.now(timezone.utc) - timedelta(minutes=timeout_min))
+    corte_txt = corte.strftime("%Y-%m-%dT%H:%M:%f")[:-3] + "Z"
+    with _lock, conn:
+        cur = conn.execute(
+            "UPDATE trabajos SET estado='encolado'"
+            " WHERE estado='enviado' AND claimed_at IS NOT NULL AND claimed_at < ?",
+            (corte_txt,),
+        )
+        return cur.rowcount
 
 
 def marcar_trabajo(conn: sqlite3.Connection, trabajo_id: int, nuevo: str) -> bool:
