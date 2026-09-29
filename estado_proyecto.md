@@ -60,12 +60,14 @@
 - Verificado: `ssh ... localhost` llega al demonio y ofrece `publickey,password,keyboard-interactive` (el `Permission denied` es lo esperado, la privada está en la Pi).
 - **Lado PC validado end-to-end con una clave sonda**: se generó un par efímero en la PC, se agregó temporalmente su pública al archivo de admins, se probó `ssh -i sonda ... whoami` desde la propia PC (**exit 0**, respondió el usuario) y se restauró el archivo dejando **solo** la clave de la Pi (verificado: 1 clave, ACL correcta, primer byte `115` sin BOM). Con esto queda demostrado que el archivo, la ACL y la configuración de `sshd` del lado Windows funcionan; cualquier fallo que quede es exclusivamente del lado Pi (transferencia de la clave o `known_hosts`). La sonda se borró.
 - Error que aparece en el primer intento desde la Pi: `Host key verification failed` → **no es un fallo de autenticación**, es que la Pi no conoce la clave de host de la PC. Se resuelve agregando la clave de host correcta a `~/.ssh/known_hosts` en la Pi (obtenida de la propia PC, no vía `ssh-keyscan` a ciegas). `power.py` ya usa `accept-new`, así que el propio `--shutdown` no vuelve a tropezar con esto.
+- **`CONEXION_OK` confirmado desde la Pi**: la clave pública instalada coincide y entra sin contraseña.
+- **Prueba no destructiva del apagado por SSH** (el riesgo real era que una sesión SSH **no elevada** no tuviera `SeShutdownPrivilege`): se programó `shutdown /s /t 300` **a través de SSH** → `exit 0`, y enseguida se abortó (`shutdown /a` por SSH → `exit 0`; el abort local posterior devolvió `1116 = no había apagado pendiente`, lo que **confirma** que el abort por SSH sí canceló algo). Conclusión: el apagado remoto por SSH funciona; la PC nunca se apagó durante la prueba.
 - 51 tests OK.
 
 ### Pendiente para la próxima sesión
-1. **Probar SSH desde la Pi** (inmediato, lado Pi): `ssh -o BatchMode=yes -i ~/.ssh/id_ed25519 <usuario_pc>@<PC_IP> "echo CONEXION_OK"`. Si responde, recién ahí completar `SSH_USER`/`SSH_KEY` en el `.env` de la Pi.
-2. Recién con la clave verificada: **desactivar `PasswordAuthentication`** en `C:\ProgramData\ssh\sshd_config` y reiniciar `sshd`.
-3. Probar `python3 -m mnemoslate.infra --shutdown` end-to-end (esto apaga la PC de verdad).
+1. ~~Probar SSH desde la Pi~~ **HECHO**: `CONEXION_OK` confirmado.
+2. ~~Desactivar `PasswordAuthentication`~~ **POSPUESTO por decisión del usuario**: `power.py` usa `BatchMode=yes` igual, así que no hace falta para que funcione; el firewall ya lo limita a la LAN. Dejarlo habilitado es una puerta de respaldo. Decidir más adelante.
+3. **Probar `python3 -m mnemoslate.infra --shutdown` end-to-end desde la Pi** (apaga la PC de verdad): requiere `SSH_USER` (el usuario de Windows) y `SSH_KEY` (ruta a la privada en la Pi) en el `.env` de la Pi. Recordar que la salida esperada es un `Connection closed` interpretado como éxito, no una salida limpia.
 4. **Probar WoL real desde la Pi**: `shutdown /s /t 0` en la PC y desde la Pi `--ciclo`. Debe arrancar en 10-60s; repetir para confirmar reproducibilidad.
 5. Tildar **"Solo permitir Magic Packet"** en la NIC y re-testear (RNF-1).
 6. **Fase 4**: `bot.py cmd_desarrollar` consumiendo la cola `trabajos` con `ping → wol → esperar → enviar a OpenCode → apagar`.
