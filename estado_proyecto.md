@@ -157,3 +157,26 @@
 - **Pendiente inmediato**: primer `--test` real desde la Pi. Hay que fijar el
   formato exacto de `--format json` mirando la salida cruda.
 
+## 2026-09-29 — Sesión 13 (bug de rutas de `-f` + semántica real de `opencode run`)
+- **Bug real encontrado al probar a mano**: el payload lo deja `scp` en el home del
+  usuario de la PC, pero `opencode run` resuelve `-f` con
+  `path.resolve(--dir ?? root, ruta)` → relativo al `--dir`, un nombre pelado no se
+  encuentra y el e2e moría con `File not found`. Fix: `ruta_payload_absoluta()` pasa
+  `-f "%USERPROFILE%\mnemo_payload_….json"` (cmd expande; al ser absoluta,
+  `path.resolve` la respeta). El payload sigue en el home, no ensucia el repo de lore.
+- **Corrección de docs**: `-f` NO significa "leé el prompt de este archivo" sino
+  "file(s) to attach to message" (adjunta). El sender y el README lo describían mal.
+- **Robustez**: como `-f` adjunta el JSON entero, `INSTRUCCION_CORTA` ahora nombra
+  explícitamente el campo `prompt` del adjunto (si no, el modelo no sabe dónde está
+  el encargo).
+- Nota del usuario al probar: por `ssh` desde bash los backslashes se comen
+  (`D:\Docs` → `D:Documents`) y opencode avisa `Failed to change directory`. El
+  sender no sufre eso (arma el argv sin shell local), pero queda documentado para
+  pruebas manuales.
+- Tests anti-regresión nuevos: payload con ruta absoluta, payload siempre
+  entrecomillado, instrucción nombra `prompt`. **Suite: 91/91 OK.**
+- Hardware anotado para un futuro local: RTX 3070 8GB + 32GB DDR4 → 7–8B Q4 entra
+  cómodo; 14B Q4 al límite de VRAM. Mismo flag `-m` vía `OPENCODE_MODEL`.
+- **Pendiente inmediato**: primer `--test` real desde la Pi (ver comando manual en
+  README "Probar a mano en la PC").
+

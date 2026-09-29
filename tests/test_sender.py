@@ -39,6 +39,7 @@ from mnemoslate.sender import (  # noqa: E402
     ejecutar_cli,
     extraer_texto_salida,
     procesar_trabajo,
+    ruta_payload_absoluta,
 )
 
 SCRIBE_OK = "title (X)\n# X ((X))\n\n## Resumen ((+Resumen))\n\ntexto.\n"
@@ -216,6 +217,27 @@ class TestSalida(unittest.TestCase):
         # no debe pedirlo (evita la regresión de la Sesión 11).
         self.assertNotIn("scribe", INSTRUCCION_CORTA.lower())
         self.assertIn("referencia", INSTRUCCION_CORTA.lower())
+
+    def test_instruccion_nombra_el_campo_prompt(self):
+        # `-f` adjunta el JSON entero; el modelo tiene que saber que el encargo
+        # está en el campo `prompt`.
+        self.assertIn("prompt", INSTRUCCION_CORTA)
+
+    def test_payload_se_pasa_con_ruta_absoluta(self):
+        # Regresión: `opencode run` resuelve `-f` con path.resolve(--dir ?? root, ruta).
+        # El payload lo deja `scp` en el home, así que un nombre pelado no se
+        # encuentra y el e2e moría con "File not found".
+        c = comando_opencode_remoto(r"D:\Docs\lore", "mnemo_payload_1_1.json")
+        self.assertIn(r'-f "%USERPROFILE%\mnemo_payload_1_1.json"', c)
+        # y el nombre pelado NO debe aparecer suelto (sería relativo al --dir)
+        self.assertNotIn("-f mnemo_payload_1_1.json", c)
+
+    def test_ruta_payload_siempre_entrecomillada(self):
+        # El %USERPROFILE% expandido puede traer espacios: siempre comillas.
+        for nombre in ("mnemo_payload_1_1.json", "con espacio.json"):
+            r = ruta_payload_absoluta(nombre)
+            self.assertTrue(r.startswith('"') and r.endswith('"'), r)
+            self.assertIn(nombre, r)
 
     def test_instruccion_no_rompe_el_comando_remoto(self):
         # El comando remoto entrecomilla la instrucción: unas comillas dobles

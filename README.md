@@ -167,8 +167,9 @@ Contrato Pi↔PC (`sender.py`, sin puertos públicos, RNF-3):
    expirado: anti-zombi por `CLAIM_TIMEOUT_MIN`).
 2. Ciclo `infra` (ping→WoL→wait). Si la PC no arranca: todo queda pendiente y
    Telegram avisa (RNF-4). La PC nunca se toca si ya está arriba (RNF-1).
-3. El prompt viaja en **archivo** (`scp payload.json` + `opencode run --format json
-   --dir <EDESSIA_PC_DIR> -f payload "<instrucción corta>"`): argv de Windows
+3. El prompt largo viaja en **archivo**: `scp mnemo_payload_<trabajo>_<job>.json`
+   al home del usuario de la PC + `opencode run --format json -m <modelo>
+   --dir <EDESSIA_PC_DIR> -f <ruta abs> "<instrucción corta>"`. argv de Windows
    limita a ~32k chars, el lore no entra.
 4. OpenCode devuelve **Markdown de referencia** (encabezados y prosa, sin
    frontmatter YAML). Solo la **Pi escribe** en `outputs/` (single-writer).
@@ -199,6 +200,41 @@ Supuesto pendiente de fijar con el e2e real: el parseo de eventos `--format json
 (`extraer_texto_salida()` ya tolera JSON y texto crudo). La instrucción corta que
 viaja en argv (`INSTRUCCION_CORTA`) pide **Markdown de referencia**; no puede
 contener comillas dobles porque el comando remoto las envuelve.
+
+### Trampas de `opencode run` (encontradas leyendo `run.ts`)
+
+- **`-f` adjunta, no es "leé el prompt de acá".** Es "file(s) to attach to
+  message": el archivo entero viaja como adjunto. Por eso `INSTRUCCION_CORTA`
+  dice explícitamente que el encargo está en el campo `prompt` del JSON.
+- **`-f` se resuelve relativo al `--dir`.** El código hace
+  `path.resolve(--dir ?? root, ruta)`, así que un nombre pelado depositado por
+  `scp` en el home **no se encuentra** (`File not found`). Por eso `-f` recibe
+  `"%USERPROFILE%\mnemo_payload_….json"`: cmd (shell por defecto de sshd) expande
+  la variable y, al ser absoluta, `path.resolve` la respeta.
+- **Backslashes**: si probás a mano por `ssh` desde la Pi, envolvé la ruta con
+  comillas simples en bash o se comen (`D:\Docs` → `D:Documents`). El sender no
+  sufre esto porque arma el argv sin pasar por un shell local.
+
+### Probar a mano en la PC (sin la Pi)
+
+`payload.json` lo crea la Pi; para replicarlo a mano ponelo en la carpeta lore
+(resuelta contra `--dir`):
+
+```json
+{"trabajo": 0, "job": 1, "fuente": [1], "extra": "",
+ "prompt": "Think of a very short scene where you can note the discrepancy between social classes in the empire. Total output must be around 200 words or less."}
+```
+
+```powershell
+opencode run -m opencode/big-pickle --format json `
+  --dir D:\Documentos\Projects\Edessia -f payload.json `
+  "El archivo adjunto es un JSON cuyo campo prompt trae el encargo. Desarrolla ese lore y devuelve SOLO el documento final en Markdown de referencia: encabezados y prosa, sin frontmatter (---), sin vallas de codigo y sin comentarios sobre tu proceso."
+```
+
+Modelo: `OPENCODE_MODEL` en el `.env` de la Pi (vacío = default de la PC).
+`opencode/big-pickle` es el modelo gratis de OpenCode Zen (razonamiento, 200K ctx).
+Cambiar de modelo es **una línea del `.env`**; para privacidad total, `ollama/<modelo>`
+local en la PC también entra por el mismo `-m`.
 
 ## Comandos (índice)
 

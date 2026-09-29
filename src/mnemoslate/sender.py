@@ -1,9 +1,15 @@
 """Sender Fase 4: la Pi consume trabajos → PC (`opencode run`) → outputs/ → Telegram → apagado.
 
 Contrato Pi↔PC (ver README "Fase 4: sender"):
-1. Pi: `scp` payload.json (prompt de referencia + meta) al home del usuario en la PC.
-2. Pi: `ssh opencode run --format json [-m modelo] --dir <Edessia> -f payload "<instrucción>"`.
-   El prompt viaja en ARCHIVO (`-f`), no en argv (Windows limita argv a ~32k chars).
+1. Pi: `scp` payload.json (JSON con el prompt de referencia + meta) al home del
+   usuario en la PC. El prompt largo viaja en el ARCHIVO, no en argv (Windows
+   limita argv a ~32k chars).
+2. Pi: `ssh opencode run --format json [-m modelo] --dir <lore> -f <RUTA_ABS> "<instr>"`.
+   Dos trampas de `opencode run` (run.ts): `-f` significa "file(s) to attach to
+   message" (ADJUNTA el archivo, no toma el prompt de ahí) y su ruta se resuelve
+   con `path.resolve(--dir ?? root, ruta)`. Por eso `-f` recibe la ruta ABSOLUTA
+   (`%USERPROFILE%` + el nombre del payload): cmd la expande y al ser absoluta
+   ignora el `--dir`.
 3. PC: stdout (`--format json`, o texto si algo falla) → la Pi extrae el documento.
 4. Pi (single-writer): `envolver_referencia()` + `guardar_lore(outputs)` → ideas a
    `procesada`, trabajo a `hecho`. OpenCode nunca escribe archivos.
@@ -46,13 +52,16 @@ log = logging.getLogger("mnemoslate.sender")
 TIMEOUT_SSH = 15.0
 OPENCODE_TIMEOUT = 600.0
 
-# Instrucción corta que viaja en argv (el prompt largo va en el archivo `-f`).
+# Instrucción corta que viaja en argv (el prompt largo va en el archivo adjunto).
 # Debe pedir Markdown de REFERENCIA: scribe queda reservado para `scribe/` → PDF.
 # Sin comillas dobles (el comando remoto las envuelve) y sin vallas de código.
+# Nombra explícitamente el campo `prompt` del JSON adjunto: `-f` adjunta el
+# archivo entero, así que el modelo tiene que saber dónde está el encargo.
 INSTRUCCION_CORTA = (
-    "Desarrolla el lore del prompt del payload adjunto. Devuelve SOLO el "
-    "documento final en Markdown de referencia: encabezados y prosa, sin "
-    "frontmatter (---), sin vallas de codigo y sin comentarios sobre tu proceso."
+    "El archivo adjunto es un JSON cuyo campo prompt trae el encargo. "
+    "Desarrolla ese lore y devuelve SOLO el documento final en Markdown de "
+    "referencia: encabezados y prosa, sin frontmatter (---), sin vallas de "
+    "codigo y sin comentarios sobre tu proceso."
 )
 
 # Idea canónica de prueba para `--test`: una escena corta, siempre igual. Vive en
@@ -108,11 +117,25 @@ def comando_scp(host: str, usuario: str, llave: str,
     ]
 
 
+def ruta_payload_absoluta(nombre: str) -> str:
+    """Ruta ABSOLUTA (entrecomillada) del payload para `opencode run -f`.
+
+    `scp` deposita el payload en el home del usuario de la PC, pero `opencode run`
+    resuelve `-f` con `path.resolve(--dir ?? root, ruta)`: relativo al `--dir`, un
+    nombre pelado no se encuentra. `%USERPROFILE%` lo expande cmd (shell por
+    defecto de sshd en Windows) y, al ser absoluta, `path.resolve` la respeta.
+    """
+    return f'"%USERPROFILE%\\{nombre}"'
+
+
 def comando_opencode_remoto(edessia_pc_dir: str, payload_remoto: str,
                             modelo: str = "") -> str:
-    """Comando que corre EN la PC (cmd). Rutas con espacios entrecomilladas."""
+    """Comando que corre EN la PC (cmd). Rutas con espacios entrecomilladas.
+
+    `payload_remoto` es el NOMBRE pelado tal como lo deja `scp` en el home.
+    """
     ed = f'"{edessia_pc_dir}"' if " " in edessia_pc_dir else edessia_pc_dir
-    pl = f'"{payload_remoto}"' if " " in payload_remoto else payload_remoto
+    pl = ruta_payload_absoluta(payload_remoto)
     modelo_flag = f" -m {modelo}" if modelo.strip() else ""
     return (
         f'opencode run --format json{modelo_flag} --dir {ed} -f {pl} '
