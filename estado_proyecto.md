@@ -101,3 +101,10 @@
 - `pyproject.toml` (setuptools src-layout, proyecto `mnemoslate`): `pip install -e .` en el venv → chau `PYTHONPATH` (README actualizado, `export` eliminados).
 - `deploy/mnemoslate.service`: plantilla systemd (venv python, EnvironmentFile=.env, Restart=always) + sección Deploy Pi en README.
 - README: tabla única "Comandos" (bot + CLIs).
+
+## 2026-09-29 — Sesión 10 (verificación RF-2.4 en la Pi + fix de test)
+- **`--shutdown` y `--ciclo` verificados end-to-end en la Pi por el usuario**: con `SSH_USER`/`SSH_KEY` en el `.env` real de la Pi, el apagado remoto por SSH y el ciclo ping→WoL→espera funcionan sobre el hardware real. Cierra la Fase 1 (RF-2.1/2.2/2.3/2.4). No hace falta retestear.
+- **Test rojo corregido**: `tests/test_sender.py::TestCLI::test_sin_config_error` fallaba solo en la Pi (`AssertionError: 0 != 2`). Causa: el test limpiaba `os.environ` pero **no** evitaba que `_buscar_env()` (config.py) cargara el `.env` real de la raíz del repo, así que la config "faltante" en realidad existía y el CLI devolvía `0`. Era un problema de **aislamiento del test**, no del producto (en la PC dev, sin `.env`, pasaba por casualidad). Fix: `patch("mnemoslate.config.load_dotenv")` para anular la carga desde `.env` durante el test.
+- Reproducido en la PC dev creando un `.env` temporal con placeholders → `0 != 2`; con el fix, **83/83 OK tanto con `.env` como sin él**. El `.env` temporal se borró.
+- Nota de entorno: la Pi corre Python 3.11 y la suite se lanzaba con `PYTHONPATH=src`; tras Sesión 9 hay `pyproject.toml` + `pip install -e .`, así que el `PYTHONPATH` ya no es necesario en un venv.
+

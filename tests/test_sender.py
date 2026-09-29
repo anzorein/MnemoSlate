@@ -242,8 +242,12 @@ class TestCLI(unittest.TestCase):
         tmp.cleanup()
 
     def test_sin_config_error(self):
+        # Limpiar os.environ NO alcanza: en la Pi hay un .env real en la raíz del
+        # repo y `_buscar_env()` lo carga igual (config.py), con lo que la config
+        # "faltante" en realidad existe. Se anula load_dotenv para aislar el test.
         tmp = tempfile.TemporaryDirectory()
-        with patch.dict(os.environ, {}, clear=True):
+        with patch.dict(os.environ, {}, clear=True), \
+                patch("mnemoslate.config.load_dotenv"):
             rc = ejecutar_cli("--test", Path(tmp.name) / "t.db")
         self.assertEqual(rc, SALIDA_ERROR)
         tmp.cleanup()
