@@ -67,6 +67,56 @@ desde la Pi `python -m mnemoslate.infra --ciclo`. Debe arrancar en 10-60s.
 Códigos de salida: `0` encendida / orden enviada · `1` no respondió en el plazo
 (la idea queda *pendiente*, RNF-4) · `2` error de config o hardware.
 
+## Fase 1: apagado remoto por SSH (RF-2.4)
+
+Para que la Pi pueda apagar la PC (`python -m mnemoslate.infra --shutdown`) hace
+falta OpenSSH Server en la PC, configurado **solo por clave**:
+
+**En la PC (PowerShell como Administrador):**
+```powershell
+Add-WindowsCapability -Online -Name OpenSSH.Server~~~~0.0.1.0
+Set-Service  sshd -StartupType Automatic
+Start-Service sshd
+# que quede acotado a la red local (perfil Private), nunca público (RNF-3)
+New-NetFirewallRule -Name MnemoSlate-SSH -DisplayName 'SSH (LAN)' -Enabled True `
+  -Direction Inbound -Protocol TCP -Action Allow -LocalPort 22 `
+  -Profile Private -RemoteAddress LocalSubnet
+```
+
+**En la Raspberry** (la privada nunca sale de acá):
+```bash
+ssh-keygen -t ed25519 -f ~/.ssh/id_ed25519 -N "" -C "mnemoslate-pi"
+```
+
+**De vuelta en la PC**, instalar la clave pública que imprimiste. Ojo con esto:
+si el usuario de Windows **es administrador**, Windows **ignora**
+`~/.ssh/authorized_keys` y lee `C:\ProgramData\ssh\administrators_authorized_keys`:
+
+```powershell
+# en PowerShell COMO ADMINISTRADOR (la ACL es obligatoria o sshd no lee el archivo)
+$pub = 'ssh-ed25519 AAAA... mnemoslate-pi'
+[IO.File]::WriteAllText("C:\ProgramData\ssh\administrators_authorized_keys", $pub + "`n", (New-Object Text.UTF8Encoding($false)))
+icacls "C:\ProgramData\ssh\administrators_authorized_keys" /inheritance:r
+icacls "C:\ProgramData\ssh\administrators_authorized_keys" /grant '*S-1-5-18:F' '*S-1-5-32-544:F'   # SYSTEM y Administrators
+Restart-Service sshd
+```
+> Se usan los SID y no los nombres porque en Windows en español el grupo se llama
+> `Administradores`. `WriteAllText` en vez de `Out-File` porque `Out-File -Encoding
+> utf8` en PowerShell 5.1 mete BOM y sshd rechaza el archivo.
+
+**Probar desde la Pi** (esto no apaga nada todavía):
+```bash
+ssh -o BatchMode=yes -i ~/.ssh/id_ed25519 <TU_USUARIO_PC>@<PC_IP> "echo CONEXION_OK"
+```
+
+Recién cuando eso responda `CONEXION_OK`, completá `SSH_USER` y `SSH_KEY` en el
+`.env` de la Pi y probá `python3 -m mnemoslate.infra --shutdown`.
+
+**Detalle de diseño:** el apagado usa `shutdown /s /t N` con `N >= 1`, no `/t 0`.
+Con retardo 0 la sesión SSH se corta antes de que el comando responda y el
+cliente ve "Connection closed", que se confunde con un fallo. `power.py` además
+distingue ese cierre abrupto (que significa "se apagó") de un error real de SSH.
+
 ## Uso dev (sin instalar nada global aún)
 
 ```bash

@@ -40,9 +40,33 @@
 - Arreglado `UnicodeEncodeError`: en Windows la consola es cp1252 y los emojis rompían la CLI; `main()` fuerza UTF-8 con `errors="replace"`.
 
 ### Pendiente para la próxima sesión
-1. **Probar WoL real desde la Pi** (lo único que no se puede hacer desde la PC dev): `shutdown /s /t 0` en la PC, y desde la Pi `export PYTHONPATH=src && python -m mnemoslate.infra --ciclo`. Debe arrancar en 10-60s. Después repetir una vez más para confirmar reproducibilidad.
+1. **Probar WoL real desde la Pi** (lo único que no se puede hacer desde la PC dev): `shutdown /s /t 0` en la PC, y desde la Pi `export PYTHONPATH=src && python3 -m mnemoslate.infra --ciclo`. Debe arrancar en 10-60s. Después repetir una vez más para confirmar reproducibilidad.
 2. Tildar **"Solo permitir Magic Packet"** en la NIC (faltaba) y re-testear: confirma RNF-1 (pings sueltos ya no despiertan la PC).
 3. **Fase 4**: `bot.py cmd_desarrollar` debe consumir la cola `trabajos` con el ciclo `ping → wol → esperar → (Fase 4) enviar a OpenCode → apagar` (RF-2.4), manteniendo la idea en *pendiente* si la PC no arranca (RNF-4).
-4. OpenSSH Server en la Windows + `SSH_USER`/`SSH_KEY` en el `.env` para habilitar el apagado remoto.
-5. Transcripción de voz (Whisper local) y Syncthing (Fase 3).
+4. Transcripción de voz (Whisper local) y Syncthing (Fase 3).
+
+## 2026-09-29 — Sesión 5 (RF-2.4: OpenSSH Server en la PC, para el apagado remoto)
+- **OpenSSH Server instalado en la PC** (Windows 11 Pro). El capability estaba `NotPresent`; el cliente `ssh.exe` ya venía de fábrica.
+  - Servicio `sshd`: `Running` + `StartType=Automatic` (arranca solo al prender la PC, necesario para poder apagarla).
+  - Firewall: regla `OpenSSH-Server-In-TCP` habilitada, puerto 22 TCP, perfil **Private** (nunca público → RNF-3). Se verificó que la interfaz `Ethernet` está en categoría `Private`; si estuviera en `Public` la regla no aplicaría.
+  - `PubkeyAuthentication` verificado activo (default). **`PasswordAuthentication` sigue habilitado a propósito**: se desactiva recién después de confirmar que la clave entra, para no quedarse sin acceso remoto.
+  - Log `OpenSSH/Operational` limpio: sin errores de lectura ni de permisos del archivo de claves.
+- **Detalle crítico discovered (el error clásico de Windows)**: el usuario de la PC **es administrador** (en `whoami /groups` el grupo `BUILTIN\Administradores` aparece como *usado solo para denegar* = token no elevado). Para admins, Windows sshd **ignora `~/.ssh/authorized_keys`** y lee `C:\ProgramData\ssh\administrators_authorized_keys`. Poner la clave en el `~/.ssh/` "correcto" simplemente no entra.
+  - Clave pública de la Pi instalada ahí, **sin BOM** (`Out-File -Encoding utf8` en PS 5.1 lo mete y sshd lo rechaza → se usó `[IO.File]::WriteAllText` con `UTF8Encoding($false)`).
+  - ACL estricta con **SID y no nombres**, porque el Windows está en español y el grupo se llama `Administradores`: `icacls /inheritance:r` + `/grant '*S-1-5-18:F' '*S-1-5-32-544:F'` (SYSTEM y Administrators). Sin esto sshd se niega a leer el archivo.
+  - Script idempotente con validación del formato de la clave antes de escribir.
+- `power.py` ya estaba preparado para esto: `BatchMode=yes` (nunca pide password → la clave es obligatoria), `StrictHostKeyChecking=accept-new`, y `shutdown /s /t N` con retardo ≥1 para que la orden vuelva antes de que muera la sesión.
+- Documentado todo el procedimiento en `README.md` (sección "Fase 1: apagado remoto por SSH") y en `.env.example`, **sin embeber la clave pública ni el nombre de usuario reales** en archivos versionados. La clave pública se pega a mano.
+- Verificado: `ssh ... localhost` llega al demonio y ofrece `publickey,password,keyboard-interactive` (el `Permission denied` es lo esperado, la privada está en la Pi).
+- 51 tests OK.
+
+### Pendiente para la próxima sesión
+1. **Probar SSH desde la Pi** (inmediato, lado Pi): `ssh -o BatchMode=yes -i ~/.ssh/id_ed25519 <usuario_pc>@<PC_IP> "echo CONEXION_OK"`. Si responde, recién ahí completar `SSH_USER`/`SSH_KEY` en el `.env` de la Pi.
+2. Recién con la clave verificada: **desactivar `PasswordAuthentication`** en `C:\ProgramData\ssh\sshd_config` y reiniciar `sshd`.
+3. Probar `python3 -m mnemoslate.infra --shutdown` end-to-end (esto apaga la PC de verdad).
+4. **Probar WoL real desde la Pi**: `shutdown /s /t 0` en la PC y desde la Pi `--ciclo`. Debe arrancar en 10-60s; repetir para confirmar reproducibilidad.
+5. Tildar **"Solo permitir Magic Packet"** en la NIC y re-testear (RNF-1).
+6. **Fase 4**: `bot.py cmd_desarrollar` consumiendo la cola `trabajos` con `ping → wol → esperar → enviar a OpenCode → apagar`.
+7. Transcripción de voz (Whisper local) y Syncthing (Fase 3).
+
 
