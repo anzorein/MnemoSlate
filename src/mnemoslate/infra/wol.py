@@ -27,7 +27,7 @@ _MAC_FORMATO = re.compile(r"\A(?:[0-9A-Fa-f]{2}[:.\-]){5}[0-9A-Fa-f]{2}\Z|\A[0-9
 
 
 def normalizar_mac(mac: str) -> bytes:
-    """'11-22-33-44-55-66' -> b'\x11\x22\x33\x44\x55\x66'.
+    """'11-22-33-44-55-66' -> b'\\x11\\x22\\x33\\x44\\x55\\x66'.
 
     Acepta ':', '-', '.' o sin separadores, en mayúsculas o minúsculas.
     Lanza ValueError con el formato esperado si no puede interpretar la MAC.

@@ -22,7 +22,8 @@
 
 ## 2026-09-28 — Sesión 4 (Fase 1: red y energía / WoL)
 - **Hardware de la PC configurado y verificado**: placa ASUS Prime B450M-A, NIC `Realtek PCIe GbE Family Controller` (RTL8111H) por cable.
-  - Red: `Ethernet` = IP `192.0.2.15/24` → broadcast `192.0.2.255`; MAC **`11:22:33:44:55:66`**. IP reservada en el router. Pi y PC en la misma LAN.
+  - Red: PC por cable en la LAN del router (subred /24) con la Pi, **IP reservada por DHCP**. Broadcast de la subred = `192.168.x.255` (se deriva solo de `PC_IP` si no lo pones en el `.env`). **Los valores reales de MAC e IP viven únicamente en el `.env` local de cada máquina (gitignoreado) — nunca en archivos versionados.**
+  - **Tus datos reales para la PC están en tu `.env` local**: `PC_MAC` (la NIC Ethernet, NO el WiFi USB) y `PC_IP` (la IP reservada en el router). `git grep -i "PC_MAC" -- .` en el repo solo debe devolver la plantilla.
   - BIOS: `Advanced → APM Configuration → Power On By PCI-E` = Enabled, `ErP Ready` = Disabled.
   - Windows: NIC → "Permitir que este dispositivo reactive el equipo" + Opciones avanzadas (`Wake on Magic Packet` / `Wake on Pattern Match` Enabled, `Energy Efficient Ethernet` Disabled); `powercfg /h off` (mata el inicio rápido, ya no hace falta desmarcarlo a mano); temporizadores de reactivación del plan de energía OK.
   - **LED del RJ45 encendido con la PC apagada** = capa física lista (ErP no corta la NIC).

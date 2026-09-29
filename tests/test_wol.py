@@ -16,7 +16,7 @@ class TestNormalizarMac(unittest.TestCase):
     def test_formatos_aceptados(self):
         for texto in (
             "11:22:33:44:55:66",
-            "11:22:33:44:55:66",
+            "11:22:33:44:55:66".lower(),
             "11-22-33-44-55-66",
             "11.22.33.44.55.66",
             "112233445566",
@@ -31,9 +31,9 @@ class TestNormalizarMac(unittest.TestCase):
             "   ",
             "11:22:33:44:55",          # muy corta
             "11:22:33:44:55:66:99",   # muy larga
-            "11:22:33:44:55:ZZ",      # hex inválido
+            "11:22:33:44:55:ZZ",      # hex invÃ¡lido
             "11 22 33 44 55 66",      # separador no soportado
-            "192.0.2.15",          # es una IP, no una MAC
+            "192.0.2.15",             # es una IP, no una MAC
             None,
         ):
             with self.subTest(malo=malo):

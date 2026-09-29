@@ -90,7 +90,7 @@ class TestBroadcast(unittest.TestCase):
         self.assertEqual(net.broadcast_de("192.0.2.15", 24), "192.0.2.255")
         self.assertEqual(net.broadcast_de("192.168.1.50", 24), "192.168.1.255")
         self.assertEqual(net.broadcast_de("10.0.0.7", 8), "10.255.255.255")
-        self.assertEqual(net.broadcast_de("192.0.2.15", 16), "192.168.255.255")
+        self.assertEqual(net.broadcast_de("192.0.2.15", 16), "192.0.255.255")
         self.assertEqual(net.broadcast_de("192.0.2.15", 32), "192.0.2.15")
 
     def test_ip_invalida(self):
