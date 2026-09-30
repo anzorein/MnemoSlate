@@ -30,6 +30,7 @@ import sqlite3
 import subprocess
 import sys
 import tempfile
+import time
 import urllib.parse
 import urllib.request
 from dataclasses import dataclass, field
@@ -189,6 +190,25 @@ def _juntar_texto(obj: object, salida: list[str]) -> None:
             _juntar_texto(item, salida)
 
 
+def formatear_duracion(seg: float) -> str:
+    """`3723.0` -> `1h02m`; `83.4` -> `1m23s`; `4.2` -> `4.2s` (avisos legibles)."""
+    seg = max(0.0, float(seg))
+    if seg < 60:
+        return f"{seg:.1f}s"
+    minutos, resto = divmod(seg, 60)
+    if minutos < 60:
+        return f"{int(minutos)}m{int(resto):02d}s"
+    horas, minutos = divmod(minutos, 60)
+    return f"{int(horas)}h{int(minutos):02d}m"
+
+
+def bloque_tiempos(tiempos: list[tuple[str, float]], total: float) -> str:
+    """Bloque `⏱️` para el aviso ✅ y el mensaje CLI (Telegram + stdout)."""
+    lineas = [f"• {etiqueta}: {formatear_duracion(s)}" for etiqueta, s in tiempos]
+    lineas.append(f"• Total: {formatear_duracion(total)}")
+    return "⏱️ Tiempos:\n" + "\n".join(lineas)
+
+
 def notificar_telegram(token: str, chat_id: int, texto: str,
                        timeout: float = 15.0) -> bool:
     """POST a Bot API con stdlib. Nunca lanza: el aviso no puede romper el pipeline."""
@@ -305,18 +325,24 @@ def procesar_trabajo(conn: sqlite3.Connection, infra: InfraSettings,
     activo (nunca se apaga una sesión ajena). `forzar_sin_apagar` = modo --test.
     `prefijo` antepone al nombre del archivo en `outputs/` (ej: `test-`).
     `titulo_forzado` fija el título del archivo (principalmente para `--test`).
+    Mide cada paso (ciclo, scp, opencode, guardado) y lo reporta en el aviso ✅
+    y en el mensaje (Telegram + stdout del CLI).
     """
+    t_inicio = time.monotonic()
     ent = entorno or entorno_real(infra, token, chat_id)
     trabajo: Trabajo | None = reclamar_trabajo(conn, infra.claim_timeout_min)
     if trabajo is None:
         return Resultado(0, True, "📭 Nada encolado.")
 
+    tiempos: list[tuple[str, float]] = []
     try:
         la_encendi: bool = bool(ent.asegurar_pc())  # type: ignore[operator]
     except NoHayPC as e:
         # Queda 'enviado' con claim fresco: el timeout lo libera (anti-zombi).
         ent.notificar(f"⚠️ Trabajo #{trabajo.id}: {e} Las ideas siguen pendientes.")  # type: ignore[operator]
-        return Resultado(trabajo.id, False, f"⚠️ {e}")
+        return Resultado(trabajo.id, False,
+                         f"⚠️ {e} (en {formatear_duracion(time.monotonic() - t_inicio)})")
+    tiempos.append(("ciclo PC (ping→WoL→wait)", time.monotonic() - t_inicio))
 
     archivos: list[str] = []
     try:
@@ -334,9 +360,14 @@ def procesar_trabajo(conn: sqlite3.Connection, infra: InfraSettings,
             }
             nombre = f"mnemo_payload_{trabajo.id}_{n}.json"
             remoto = ruta_payload_en_lore(infra.edessia_pc_dir, nombre)
+            t_scp = time.monotonic()
             ent.enviar_payload(json.dumps(payload, ensure_ascii=False), remoto)  # type: ignore[operator]
+            tiempos.append((f"job {n}: envío payload (scp)",
+                            time.monotonic() - t_scp))
             try:
+                t_run = time.monotonic()
                 salida = ent.correr_opencode(nombre)  # type: ignore[operator]
+                tiempos.append((f"job {n}: opencode run", time.monotonic() - t_run))
             finally:
                 try:
                     ent.borrar_remoto(remoto)  # type: ignore[operator]
@@ -349,8 +380,11 @@ def procesar_trabajo(conn: sqlite3.Connection, infra: InfraSettings,
                                       nota=f"trabajo #{trabajo.id} job {n}")
             titulo = titulo_forzado or (extracto(ideas[0].contenido, 50) if ideas  # type: ignore[union-attr]
                                        else f"trabajo-{trabajo.id}")
+            t_save = time.monotonic()
             ruta = guardar_lore(Path(infra.outputs_dir), titulo, doc,
                                 categoria=None, prefijo=prefijo)
+            tiempos.append((f"job {n}: guardado en outputs",
+                            time.monotonic() - t_save))
             archivos.append(str(ruta))
     except ErrorEnvio as e:
         if trabajo.intentos >= infra.max_intentos:
@@ -359,13 +393,15 @@ def procesar_trabajo(conn: sqlite3.Connection, infra: InfraSettings,
         else:
             marcar_trabajo(conn, trabajo.id, "encolado")  # reintento inmediato: la PC está up
             ent.notificar(f"⚠️ Trabajo #{trabajo.id}: {e} (reintento {trabajo.intentos}/{infra.max_intentos})")  # type: ignore[operator]
-        return Resultado(trabajo.id, False, f"⚠️ {e}")
+        return Resultado(trabajo.id, False,
+                         f"⚠️ {e} (en {formatear_duracion(time.monotonic() - t_inicio)})")
 
     for i in _todos_ids(trabajo):
         cambiar_estado(conn, i, "procesada")
     marcar_trabajo(conn, trabajo.id, "hecho")
     detalle = "\n".join(f"• `{a}`" for a in archivos)
-    ent.notificar(f"✅ Trabajo #{trabajo.id} completado:\n{detalle}")  # type: ignore[operator]
+    tiempos_txt = bloque_tiempos(tiempos, time.monotonic() - t_inicio)
+    ent.notificar(f"✅ Trabajo #{trabajo.id} completado:\n{detalle}\n{tiempos_txt}")  # type: ignore[operator]
     if forzar_sin_apagar:
         motivo = "modo test: sin apagar"
     elif not la_encendi:
@@ -377,18 +413,24 @@ def procesar_trabajo(conn: sqlite3.Connection, infra: InfraSettings,
     if motivo:
         ent.notificar(f"🖥️ Trabajo #{trabajo.id} listo. PC dejada encendida ({motivo}).")  # type: ignore[operator]
         return Resultado(trabajo.id, True,
-                         f"✅ Trabajo #{trabajo.id}: {len(archivos)} archivo(s). PC encendida ({motivo}).",
+                         f"✅ Trabajo #{trabajo.id}: {len(archivos)} archivo(s). "
+                         f"PC encendida ({motivo}).\n{tiempos_txt}",
                          archivos)
     try:
+        t_off = time.monotonic()
         ent.apagar()  # type: ignore[operator]
+        tiempos_txt += f"\n• apagado PC (ssh): {formatear_duracion(time.monotonic() - t_off)}"
     except Exception as e:  # noqa: BLE001 - el trabajo ya está hecho; avisar basta
         log.warning("No se pudo apagar la PC: %s", e)
         ent.notificar(f"⚠️ Trabajo #{trabajo.id} listo pero no pude apagar la PC: {e}")  # type: ignore[operator]
         return Resultado(trabajo.id, True,
-                         f"✅ Trabajo #{trabajo.id}: {len(archivos)} archivo(s). PC encendida (falló el apagado).",
+                         f"✅ Trabajo #{trabajo.id}: {len(archivos)} archivo(s). "
+                         f"PC encendida (falló el apagado).\n{tiempos_txt}",
                          archivos)
     ent.notificar(f"💤 Trabajo #{trabajo.id} listo. PC apagada.")  # type: ignore[operator]
-    return Resultado(trabajo.id, True, f"✅ Trabajo #{trabajo.id}: {len(archivos)} archivo(s). PC apagada.",
+    return Resultado(trabajo.id, True,
+                     f"✅ Trabajo #{trabajo.id}: {len(archivos)} archivo(s). "
+                     f"PC apagada.\n{tiempos_txt}",
                      archivos)
 
 

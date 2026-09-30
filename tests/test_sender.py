@@ -40,6 +40,7 @@ from mnemoslate.sender import (  # noqa: E402
     ejecutar_cli,
     extraer_texto_salida,
     entorno_real,
+    formatear_duracion,
     procesar_trabajo,
     ruta_payload_en_lore,
 )
@@ -350,6 +351,67 @@ class TestSalida(unittest.TestCase):
         c = comando_scp("1.2.3.4", "u", "k", "a.json", "b.json")
         self.assertEqual(c[0], "scp")
         self.assertIn("BatchMode=yes", c)
+
+    def test_formatear_duracion(self):
+        self.assertEqual(formatear_duracion(4.2), "4.2s")
+        self.assertEqual(formatear_duracion(0), "0.0s")
+        self.assertEqual(formatear_duracion(-3), "0.0s")
+        self.assertEqual(formatear_duracion(83.4), "1m23s")
+        self.assertEqual(formatear_duracion(3723), "1h02m")
+
+    def test_mensaje_y_aviso_incluyen_tiempos(self):
+        # El usuario pidió ver cuánto tardó cada paso (Telegram + stdout).
+        tmp = tempfile.TemporaryDirectory()
+        root = Path(tmp.name)
+        conn = init_db(root / "t.db")
+        try:
+            a = crear_idea(conn, 1, "idea con tiempos")
+            encolar_trabajo(conn, 1, [[a]])
+            f = Fakes()
+            res = procesar_trabajo(conn, _infra(root), "tok", 1, f.entorno())
+        finally:
+            conn.close()
+        self.assertTrue(res.ok)
+        for marca in ("Tiempos", "ciclo PC", "envío payload (scp)",
+                      "opencode run", "guardado en outputs", "Total",
+                      "apagado PC (ssh)"):
+            self.assertIn(marca, res.mensaje, marca)
+        aviso_ok = next(m for m in f.avisos if "completado" in m)
+        self.assertIn("Tiempos", aviso_ok)
+        tmp.cleanup()
+
+    def test_modo_test_mide_sin_apagado(self):
+        tmp = tempfile.TemporaryDirectory()
+        root = Path(tmp.name)
+        conn = init_db(root / "t.db")
+        try:
+            a = crear_idea(conn, 1, "idea test")
+            encolar_trabajo(conn, 1, [[a]])
+            f = Fakes(encendida_por_mi=True)
+            res = procesar_trabajo(conn, _infra(root), "tok", 1, f.entorno(),
+                                   forzar_sin_apagar=True)
+        finally:
+            conn.close()
+        self.assertTrue(res.ok)
+        self.assertIn("modo test", res.mensaje)
+        self.assertIn("Tiempos", res.mensaje)
+        self.assertNotIn("apagado PC", res.mensaje)
+        tmp.cleanup()
+
+    def test_fallo_incluye_tiempo_transcurrido(self):
+        tmp = tempfile.TemporaryDirectory()
+        root = Path(tmp.name)
+        conn = init_db(root / "t.db")
+        try:
+            a = crear_idea(conn, 1, "idea que falla")
+            encolar_trabajo(conn, 1, [[a]])
+            f = Fakes(opencode_ok=False)
+            res = procesar_trabajo(conn, _infra(root), "tok", 1, f.entorno())
+        finally:
+            conn.close()
+        self.assertFalse(res.ok)
+        self.assertIn(" (en ", res.mensaje)
+        tmp.cleanup()
 
 
 class TestScribe(unittest.TestCase):

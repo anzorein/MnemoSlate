@@ -250,3 +250,17 @@
   eliminados los de `%USERPROFILE%`; fixtures con la ruta real de la PC.
 - **Pendiente inmediato**: re-correr `python -m mnemoslate.sender --test` desde la Pi.
 
+## 2026-09-30 — Sesión 17 (tiempos por paso en aviso y mensaje)
+- **Pedido del usuario tras el primer `--test` real exitoso** (trabajo #1 completado,
+  `test-2026-09-29-escena-clases-sociales.md` en `outputs/`, PC dejada encendida):
+  no se veía cuánto tardó cada paso.
+- `procesar_trabajo()` mide con `time.monotonic()`: ciclo PC (ping→WoL→wait) y por
+  job envío `scp`, `opencode run` y guardado; el apagado `ssh` se mide aparte y se
+  agrega al mensaje (el aviso ✅ sale antes de apagar, así que no lo incluye).
+- `formatear_duracion()` (`4.2s`, `1m23s`, `1h02m`) + `bloque_tiempos()` (`⏱️`
+  con líneas por paso + `Total`). Va en el aviso ✅ de Telegram y en el mensaje del
+  CLI; ante fallo (`NoHayPC`, `ErrorEnvio`) el mensaje trae el tiempo transcurrido.
+- Los tests existentes usan `assertIn`, así que el texto agregado no los rompe.
+  Tests nuevos: formato, bloque en mensaje+aviso, `--test` sin línea de apagado,
+  fallo con tiempo. **Suite: 100/100 OK.**
+

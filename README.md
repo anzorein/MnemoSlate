@@ -176,9 +176,11 @@ Contrato Pi↔PC (`sender.py`, sin puertos públicos, RNF-3):
    La trazabilidad va en `<!-- MnemoSlate | fuente: #N | fecha: … -->`.
    El formato **scribe** (`scribe_markdown_reference.md`) queda reservado para
    cuando el material esté pulido y se quiera pasar a `scribe/` → PDF.
-5. Ideas a `procesada`, trabajo a `hecho`, Telegram `✅` con rutas, y apagado
-   **solo si el ciclo la encendió** (`APAGAR_AL_FINALIZAR=1`): una PC que ya estaba
-   arriba se deja encendida (RNF-1 también al apagar). Telegram dice `💤` o `🖥️`.
+5. Ideas a `procesada`, trabajo a `hecho`, Telegram `✅` con rutas **y tiempos por
+   paso** (`ciclo PC`, `scp`, `opencode run`, `guardado`, `Total`; ante fallo, el
+   tiempo transcurrido), y apagado **solo si el ciclo la encendió**
+   (`APAGAR_AL_FINALIZAR=1`): una PC que ya estaba arriba se deja encendida
+   (RNF-1 también al apagar). Telegram dice `💤` o `🖥️`.
    Fallos: reencola (o `error` tras `MAX_INTENTOS`) + alerta siempre.
 
 ### `--test`: e2e autocontenido
