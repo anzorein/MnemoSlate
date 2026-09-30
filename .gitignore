@@ -1,4 +1,5 @@
 .env
+/test.txt
 data/*.db*
 data/*.db-*
 !data/.gitkeep

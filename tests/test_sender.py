@@ -44,6 +44,7 @@ from mnemoslate.sender import (  # noqa: E402
     extraer_pensamiento,
     formatear_duracion,
     procesar_trabajo,
+    recortar_preambulo,
     ruta_payload_en_lore,
 )
 
@@ -196,6 +197,19 @@ class TestSender(unittest.TestCase):
         self.assertIn("Nada encolado", res.mensaje)
         self.assertEqual(f.apagados, 0)
 
+    def test_preambulo_sale_del_doc_y_va_a_thoughts(self):
+        # E2E del fix Sesión 22 con salida simulada con cháchara previa.
+        encolar_trabajo(self.conn, 1, [[self.a]])
+        salida = "I'll read the lore files.\n# Titulo Limpio\n\ncuerpo.\n"
+        f = Fakes(salida=salida)
+        res = procesar_trabajo(self.conn, self.infra, "tok", 1, f.entorno())
+        self.assertTrue(res.ok)
+        doc = Path(res.archivos[0]).read_text(encoding="utf-8")
+        self.assertNotIn("I'll read the lore", doc)
+        self.assertIn("# Titulo Limpio", doc)
+        th = Path(res.archivos[1]).read_text(encoding="utf-8")
+        self.assertIn("I'll read the lore", th)
+
     def test_ya_encendida_no_apaga(self):
         encolar_trabajo(self.conn, 1, [[self.a]])
         f = Fakes(encendida_por_mi=False)
@@ -319,6 +333,14 @@ class TestSalida(unittest.TestCase):
         # Regresión Sesión 21: "# ... (interim reference)" en el título.
         self.assertIn("titulo limpio", INSTRUCCION_CORTA.lower())
         self.assertNotIn("interim", INSTRUCCION_CORTA.lower())
+
+    def test_instruccion_pide_solo_pieza_y_titulo_fijo(self):
+        # Sesión 22 (test.txt línea 3): sin explicación y título en línea
+        # que empieza con numeral y espacio.
+        bajo = INSTRUCCION_CORTA.lower()
+        self.assertIn("solo", bajo)
+        self.assertIn("sin explicacion", bajo)
+        self.assertIn("numeral", bajo)
 
     def test_payload_vive_en_la_carpeta_del_lore(self):
         # Todo el payload vive bajo <EDESSIA_PC_DIR>: nada de home, nada de
@@ -535,11 +557,21 @@ class TestReferencia(unittest.TestCase):
 
     def test_prompt_sin_etiqueta_interim(self):
         # Regresión Sesión 21: el modelo copió "(interim reference)" al título.
-        # La palabra no puede aparecer en el prompt que viaja a OpenCode
-        # (en docs y comentarios está bien).
+        # El prompt PROHÍBE el ejemplo nombrandolo: lo que no puede aparecer es
+        # la etiqueta como contenido válido, no la mención en la prohibición.
         p = build_referencia_prompt([], extra="")
-        self.assertNotIn("interim", p.lower())
+        self.assertNotIn("interim reference", p.lower())
         self.assertIn("limpio", p.lower())
+
+    def test_prompt_solo_pieza_y_titulo_fijo(self):
+        # Sesión 22 (test.txt): sin explicación, sin meta-lenguaje, sin topes
+        # de largo; título fijo `# <T>` como primera línea de contenido.
+        p = build_referencia_prompt([], extra="")
+        self.assertIn("SOLO la pieza", p)
+        self.assertIn("Sin meta-lenguaje", p)
+        self.assertIn("# <Título limpio>", p)
+        self.assertNotIn("palabras", p.lower())
+        self.assertNotIn("words", p.lower())
 
     def test_envolver_referencia_trazabilidad(self):
         doc = envolver_referencia("cuerpo", [], extra="x", nota="trabajo #7 job 1")
@@ -547,6 +579,35 @@ class TestReferencia(unittest.TestCase):
         self.assertIn("MnemoSlate | fuente:", doc)
         self.assertIn("trabajo #7 job 1", doc)
         self.assertTrue(doc.endswith("cuerpo\n"))
+
+
+class TestRecorte(unittest.TestCase):
+    CHACHARA = ("I'll read the lore files needed to ground this scene.\n"
+                "# Scene 2 — The Hour Below\n\ntexto de la escena.\n")
+
+    def test_chachara_a_preambulo(self):
+        # Caso real test.txt líneas 3-4: la cháchara sale del documento.
+        pre, doc = recortar_preambulo(self.CHACHARA)
+        self.assertIn("I'll read the lore", pre)
+        self.assertTrue(doc.startswith("# Scene 2"))
+
+    def test_scribe_title(self):
+        pre, doc = recortar_preambulo("nota previa\ntitle (X)\n# X ((X))\n")
+        self.assertEqual(pre, "nota previa")
+        self.assertTrue(doc.startswith("title (X)"))
+
+    def test_sin_titulo_todo_es_documento(self):
+        pre, doc = recortar_preambulo("prosa sin encabezado")
+        self.assertEqual((pre, doc), ("", "prosa sin encabezado"))
+
+    def test_preambulo_va_a_thoughts(self):
+        # Sin traza JSON igual hay archivo: el preámbulo no se pierde.
+        th = extraer_pensamiento("texto plano", preambulo="cháchara previa")
+        self.assertIn("cháchara previa", th)
+        self.assertIn("Fuera de la pieza", th)
+
+    def test_sin_traza_ni_preambulo_vacio(self):
+        self.assertEqual(extraer_pensamiento("texto plano"), "")
 
 
 class TestCLI(unittest.TestCase):

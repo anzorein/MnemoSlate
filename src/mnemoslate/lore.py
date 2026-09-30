@@ -162,16 +162,26 @@ def envolver_scribe(texto_opencode: str, ideas: Sequence[Idea],
 # devuelve Markdown de referencia y la Pi lo guarda en `outputs/`.
 
 def build_referencia_prompt(ideas: Sequence[Idea], extra: str = "") -> str:
-    """Prompt para OpenCode: notas de REFERENCIA en Markdown (no scribe todavía)."""
+    """Prompt para OpenCode: notas de REFERENCIA en Markdown (no scribe todavía).
+
+    El documento contiene SOLO la pieza, sin topes de largo: la explicación y
+    el proceso no van acá (quedan en la traza) ni en meta-lenguaje.
+    """
     bloques = "\n".join(f"[Idea #{i.id}] ({i.estado})\n{i.contenido}" for i in ideas)
     prompt = (
         "Desarrollá worldbuilding coherente con el lore de Edessia "
         "(carpetas references/ y wiki/). Si algo contradice el lore, marcá la "
         "discrepancia en el texto y proponé resolución.\n\n"
-        "Formato: Markdown de REFERENCIA, NO el formato scribe ni PDF. "
-        "Usá encabezados y prosa; sin frontmatter YAML. "
-        "El título es limpio: solo el nombre de la pieza, sin etiquetas meta "
-        "ni aclaraciones entre paréntesis.\n\n"
+        "REGLAS DEL DOCUMENTO (obligatorias, sin excepciones):\n"
+        "- El documento contiene SOLO la pieza (escena, idea, desarrollo). "
+        "Nada de explicación, proceso, intención, análisis ni secciones meta. "
+        "Sin límite de largo: la pieza ocupa lo que necesite.\n"
+        "- Sin meta-lenguaje en el cuerpo: nada de 'Working title', 'Draft', "
+        "'interim', paréntesis aclaratorios ni anuncios de lo que vas a hacer.\n"
+        "- Primera línea de contenido, siempre: `# <Título limpio>` — solo el "
+        "nombre de la pieza, sin etiquetas ni aclaraciones.\n"
+        "- Formato: Markdown de REFERENCIA, NO el formato scribe ni PDF. "
+        "Usá encabezados y prosa; sin frontmatter YAML.\n\n"
         f"IDEAS FUENTE:\n{bloques}\n"
     )
     if extra.strip():

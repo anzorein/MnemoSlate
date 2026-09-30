@@ -321,3 +321,21 @@
 - **Idea custom propuesta** para `TEST_IDEA`/`TEST_TITULO` (ley de nombres): ver
   mensaje de la sesión.
 
+## 2026-09-30 — Sesión 22 (prompt explícito + recorte al título)
+- **Reporte del usuario (test.txt)**: salida de 223 líneas con cháchara previa
+  ("I'll read the lore files...") y meta-lenguaje en el título. Directivas:
+  sin topes de largo (tampoco para ideas), documento = SOLO la pieza, prompt
+  lo más explícito posible, título fijo siempre.
+- `build_referencia_prompt()`: reglas obligatorias — solo la pieza, sin
+  explicación/proceso/análisis/meta-lenguaje, primera línea `# <Título limpio>`.
+- `recortar_preambulo()` nuevo en `sender.py`: parte por el primer `title (` o
+  `# `; lo previo va al sidecar thoughts ("Fuera de la pieza"), nada se pierde.
+  `extraer_pensamiento()` acepta `preambulo` (genera archivo aunque no haya
+  traza JSON) y `procesar_trabajo()` lo cablea.
+- `INSTRUCCION_CORTA`: suma pieza-only + título en línea con numeral (ASCII,
+  cmd-safe). `test.txt` (contenido del libro) a `.gitignore`.
+- Tests: TestRecorte (cháchara real, scribe, sin título, preámbulo→thoughts),
+  e2e con cháchara simulada, prompt solo-pieza, instrucción. Se angostó
+  `test_prompt_sin_etiqueta_interim` (prohíbe "interim reference", nombra
+  "interim" en la prohibición). **Suite: 116/116 OK.** Sin pushear aún.
+

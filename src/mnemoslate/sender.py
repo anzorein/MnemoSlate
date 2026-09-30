@@ -28,6 +28,7 @@ import argparse
 import json
 import logging
 import os
+import re
 import sqlite3
 import subprocess
 import sys
@@ -69,7 +70,8 @@ INSTRUCCION_CORTA = (
     "El archivo adjunto es un JSON cuyo campo prompt trae el encargo. "
     "Desarrolla ese lore y devuelve SOLO el documento final en Markdown de "
     "referencia: encabezados y prosa, sin frontmatter, sin vallas de codigo, "
-    "sin comentarios sobre tu proceso y con titulo limpio, sin etiquetas meta."
+    "sin explicacion ni proceso, solo la pieza, y arranca con su titulo en "
+    "una linea que empieza con numeral y espacio, titulo limpio."
 )
 
 # Idea canónica de prueba para `--test`: una escena corta, siempre igual. Vive en
@@ -211,16 +213,36 @@ def _recortar(texto: str, largo: int = 500) -> str:
     return una_linea[:largo].rstrip() + "…(recortado)"
 
 
-def extraer_pensamiento(stdout: str, nota: str = "") -> str:
+def recortar_preambulo(texto: str) -> tuple[str, str]:
+    """Parte el texto en (preámbulo, documento) por el primer título.
+
+    El modelo a veces abre con cháchara ("I'll read the lore files...") antes
+    de la pieza. El documento arranca en la primera línea `title (` (scribe) o
+    `# ` (referencia); lo previo va al sidecar thoughts, no se pierde ni
+    ensucia el `.md`. Sin título, todo queda como documento.
+    """
+    lineas = texto.splitlines()
+    for i, linea in enumerate(lineas):
+        s = linea.strip()
+        if s.startswith("title (") or re.match(r"#{1,6}\s+\S", s):
+            return "\n".join(lineas[:i]).strip(), "\n".join(lineas[i:]).strip()
+    return "", texto.strip()
+
+
+def extraer_pensamiento(stdout: str, nota: str = "",
+                        preambulo: str = "") -> str:
     """Traza legible del proceso de OpenCode (qué leyó/hizo para llegar).
 
     Incluye pasos y llamadas a herramientas (entradas + salidas RECORTADAS: el
     contenido completo de los archivos ya vive en el lore, no se duplica).
     EXCLUYE los eventos de texto: esos son el documento y van en el `.md`
-    principal. Devuelve "" si no hay traza (stdout plano) → no se guarda archivo.
+    principal. `preambulo` (cháchara previa al título, vía recortar_preambulo)
+    se anexa como sección: nada se pierde, nada ensucia el documento.
+    Devuelve "" si no hay traza ni preámbulo → no se guarda archivo.
     """
     eventos = eventos_json(stdout)
-    if not eventos:
+    pre = (preambulo or "").strip()
+    if not eventos and not pre:
         return ""
     sesion = next((e.get("sessionID", "") for e in eventos if e.get("sessionID")), "")
     lineas = []
@@ -256,16 +278,21 @@ def extraer_pensamiento(stdout: str, nota: str = "") -> str:
         else:
             lineas.append(f"- evento `{tipo}`: "
                           f"{_recortar(json.dumps(e, ensure_ascii=False), 200)}")
-    if not lineas:
+    if not lineas and not pre:
         return ""
     partes = [f"sesión: {sesion or '?'}", f"fecha: {date.today().isoformat()}"]
     if nota:
         partes.append(nota)
     cabecera = "<!-- MnemoSlate-thoughts | " + " | ".join(partes) + " -->"
+    cuerpo = "\n".join(lineas)
+    if pre:
+        if cuerpo:
+            cuerpo += "\n"
+        cuerpo += ("## Fuera de la pieza (descartado del documento)\n\n" + pre)
     return (f"{cabecera}\n\n# Proceso (thoughts)\n\n"
             "Traza de lo que hizo OpenCode para llegar al resultado. "
             "El documento final está en el `.md` principal.\n\n"
-            + "\n".join(lineas) + "\n")
+            + cuerpo + "\n")
 
 
 def formatear_duracion(seg: float) -> str:
@@ -454,6 +481,9 @@ def procesar_trabajo(conn: sqlite3.Connection, infra: InfraSettings,
             texto = extraer_texto_salida(salida)
             if not texto:
                 raise ErrorEnvio(f"job {n}: `opencode run` no devolvió texto.")
+            preambulo, texto = recortar_preambulo(texto)
+            if not texto:
+                raise ErrorEnvio(f"job {n}: sin título detectable en la salida.")
             doc = envolver_referencia(texto, ideas, trabajo.extra,  # type: ignore[arg-type]
                                       nota=f"trabajo #{trabajo.id} job {n}")
             titulo = titulo_forzado or (extracto(ideas[0].contenido, 50) if ideas  # type: ignore[union-attr]
@@ -467,7 +497,7 @@ def procesar_trabajo(conn: sqlite3.Connection, infra: InfraSettings,
             # Sidecar con la traza del proceso (qué leyó/hizo OpenCode). Solo si
             # hay traza real: con stdout plano no se genera archivo.
             pensamiento = extraer_pensamiento(
-                salida, nota=f"trabajo #{trabajo.id} job {n}")
+                salida, nota=f"trabajo #{trabajo.id} job {n}", preambulo=preambulo)
             if pensamiento.strip():
                 ruta_th = guardar_lore(Path(infra.outputs_dir), titulo + "-thoughts",
                                        pensamiento, categoria=None, prefijo=prefijo)
