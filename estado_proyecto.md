@@ -222,3 +222,31 @@
   los argumentos. Queda pendiente el log de esa sesión.
 - **Suite: 94/94 OK.**
 
+## 2026-09-30 — Sesión 16 (payload bajo Edessia + errores que hablan)
+- **Decisión del usuario: ni `%USERPROFILE%` ni en tests.** Todo el payload vive
+  bajo `<EDESSIA_PC_DIR>`; a lo sumo un subdir `temp/` si se borra después. Como
+  `scp` no crea carpetas y el `finally` ya borra tras cada job, el payload va
+  suelto en la raíz del lore (opción `temp/` anotada como futura si se quiere la
+  raíz prístina).
+- **Causa raíz del primer `--test` real (`devolvió 1:` mudo)**: dos cosas juntas.
+  (a) `-f "%USERPROFILE%\..."` depende de que el shell remoto expanda `%VAR%`:
+  cmd sí, PowerShell no → si el `DefaultShell` de sshd es PowerShell, la ruta viaja
+  literal y el archivo no existe. (b) opencode escribe ese `File not found` por
+  STDOUT (`UI.error`), no por stderr, y `correr_opencode()` descartaba el stdout
+  ante exit ≠ 0. Evidencia diferencial: el comando manual con `-f` relativo al
+  `--dir` dio `rc=0` con la escena completa.
+- Fix: `ruta_payload_en_lore()` (join con `\`, tolera barra final, sin `%` ni env
+  vars); `scp` deposita y `del` limpia esa ruta absoluta; `-f` recibe el nombre
+  pelado que resuelve contra el `--dir`. Válido en cmd y PowerShell.
+- Fix diagnóstico: ante exit ≠ 0, el `ErrorEnvio` incluye la cola del stdout (con
+  fallback a stderr). El próximo fallo se explica solo en el `[notify]`.
+- Hallazgo lateral del `salida.txt` manual: con `--dir Edessia`, Big Pickle usó sus
+  tools para leer `wiki/04-society-factions.md` y `references/story-structure.md`
+  antes de escribir: el modelo se auto-abastece de lore. `salida.txt` se borró de
+  la raíz del repo (era un pegado temporal de diagnóstico).
+- Tests: `test_payload_vive_en_la_carpeta_del_lore`,
+  `test_f_sin_variables_de_entorno`, `test_payload_ida_y_vuelta_en_la_carpeta_del_lore`
+  (scp/del absolutos + `-f` pelado + sin `%`), `test_error_opencode_incluye_stdout`;
+  eliminados los de `%USERPROFILE%`; fixtures con la ruta real de la PC.
+- **Pendiente inmediato**: re-correr `python -m mnemoslate.sender --test` desde la Pi.
+

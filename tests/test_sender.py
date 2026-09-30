@@ -41,7 +41,7 @@ from mnemoslate.sender import (  # noqa: E402
     extraer_texto_salida,
     entorno_real,
     procesar_trabajo,
-    ruta_payload_absoluta,
+    ruta_payload_en_lore,
 )
 
 SCRIBE_OK = "title (X)\n# X ((X))\n\n## Resumen ((+Resumen))\n\ntexto.\n"
@@ -207,11 +207,12 @@ class TestSalida(unittest.TestCase):
         self.assertEqual(extraer_texto_salida(""), "")
 
     def test_comando_opencode(self):
-        c = comando_opencode_remoto(r"D:\Docs\Edessia", "p_1_1.json", modelo="a/b")
+        c = comando_opencode_remoto(r"D:\Documentos\Projects\Edessia", "p_1_1.json",
+                                    modelo="a/b")
         self.assertIn("--format json", c)
         self.assertIn("-m a/b", c)
-        self.assertIn("-f", c)
-        sin_modelo = comando_opencode_remoto(r"D:\Docs\Edessia", "p.json")
+        self.assertIn('-f "p_1_1.json"', c)
+        sin_modelo = comando_opencode_remoto(r"D:\Documentos\Projects\Edessia", "p.json")
         self.assertNotIn("-m", sin_modelo)
 
     def test_instruccion_pide_referencia_no_scribe(self):
@@ -225,21 +226,24 @@ class TestSalida(unittest.TestCase):
         # está en el campo `prompt`.
         self.assertIn("prompt", INSTRUCCION_CORTA)
 
-    def test_payload_se_pasa_con_ruta_absoluta(self):
-        # Regresión: `opencode run` resuelve `-f` con path.resolve(--dir ?? root, ruta).
-        # El payload lo deja `scp` en el home, así que un nombre pelado no se
-        # encuentra y el e2e moría con "File not found".
-        c = comando_opencode_remoto(r"D:\Documentos\Projects\Edessia", "mnemo_payload_1_1.json")
-        self.assertIn(r'-f "%USERPROFILE%\mnemo_payload_1_1.json"', c)
-        # y el nombre pelado NO debe aparecer suelto (sería relativo al --dir)
-        self.assertNotIn("-f mnemo_payload_1_1.json", c)
+    def test_payload_vive_en_la_carpeta_del_lore(self):
+        # Todo el payload vive bajo <EDESSIA_PC_DIR>: nada de home, nada de
+        # variables de entorno del shell remoto (%VAR% solo lo expande cmd).
+        r = ruta_payload_en_lore(r"D:\Documentos\Projects\Edessia",
+                                 "mnemo_payload_1_1.json")
+        self.assertEqual(r, r"D:\Documentos\Projects\Edessia\mnemo_payload_1_1.json")
+        self.assertNotIn("%", r)
+        con_barra = ruta_payload_en_lore(r"D:\Documentos\Projects\Edessia\\",
+                                         "mnemo_payload_1_1.json")
+        self.assertEqual(con_barra, r)
 
-    def test_ruta_payload_siempre_entrecomillada(self):
-        # El %USERPROFILE% expandido puede traer espacios: siempre comillas.
-        for nombre in ("mnemo_payload_1_1.json", "con espacio.json"):
-            r = ruta_payload_absoluta(nombre)
-            self.assertTrue(r.startswith('"') and r.endswith('"'), r)
-            self.assertIn(nombre, r)
+    def test_f_sin_variables_de_entorno(self):
+        # Regresión: `-f` llevaba `%USERPROFILE%\...` y si el shell remoto de sshd
+        # es PowerShell (no cmd) la variable viaja literal y el archivo no existe.
+        c = comando_opencode_remoto(r"D:\Documentos\Projects\Edessia",
+                                    "mnemo_payload_1_1.json")
+        self.assertNotIn("%", c)
+        self.assertIn('-f "mnemo_payload_1_1.json"', c)
 
     def test_mensaje_primero_y_f_ultimo(self):
         # Regresión: `-f` es un flag array (yargs) que se traga todo lo que sigue.
@@ -290,7 +294,57 @@ class TestSalida(unittest.TestCase):
         # dentro romperían el cmd remoto.
         self.assertNotIn('"', INSTRUCCION_CORTA)
         self.assertIn(f'"{INSTRUCCION_CORTA}"',
-                      comando_opencode_remoto(r"D:\Docs\Edessia", "p.json"))
+                      comando_opencode_remoto(r"D:\Documentos\Projects\Edessia", "p.json"))
+
+    def test_payload_ida_y_vuelta_en_la_carpeta_del_lore(self):
+        # scp deposita y `del` limpia la MISMA ruta absoluta bajo el lore; `-f`
+        # recibe el nombre pelado que resuelve contra el --dir. Sin shell, sin %.
+        ed = r"D:\Documentos\Projects\Edessia"
+        nombre = "mnemo_payload_7_2.json"
+        remoto = ruta_payload_en_lore(ed, nombre)
+        infra = InfraSettings(pc_mac="11:22:33:44:55:66", pc_ip="192.0.2.15",
+                              ssh_user="u", ssh_key="k", edessia_pc_dir=ed)
+        llamadas = []
+
+        class Proc:
+            returncode = 0
+            stdout = b'{"text":"hola"}'
+            stderr = b""
+
+        def fake_run(argv, **kw):
+            llamadas.append(argv)
+            return Proc()
+
+        with patch("mnemoslate.sender.subprocess.run", side_effect=fake_run):
+            ent = entorno_real(infra, "", 0)
+            ent.enviar_payload("{}", remoto)
+            ent.correr_opencode(nombre)
+            ent.borrar_remoto(remoto)
+        scp, ssh_run, ssh_del = llamadas
+        self.assertEqual(scp[0], "scp")
+        self.assertTrue(scp[-1].endswith(remoto), scp)
+        self.assertIn(f"--dir {ed}", ssh_run[-1])
+        self.assertIn(f'-f "{nombre}"', ssh_run[-1])
+        self.assertNotIn("%", ssh_run[-1])
+        self.assertIn(f'del "{remoto}"', ssh_del[-1])
+
+    def test_error_opencode_incluye_stdout(self):
+        # Regresión: opencode escribe sus errores (ej: `File not found`) por
+        # STDOUT via UI.error, no por stderr. El fallo llegaba mudo (`devolvió 1:`).
+        ed = r"D:\Documentos\Projects\Edessia"
+        infra = InfraSettings(pc_mac="11:22:33:44:55:66", pc_ip="192.0.2.15",
+                              ssh_user="u", ssh_key="k", edessia_pc_dir=ed)
+
+        class Proc:
+            returncode = 1
+            stdout = "File not found: mnemo_payload_1_1.json".encode()
+            stderr = b""
+
+        with patch("mnemoslate.sender.subprocess.run", return_value=Proc()):
+            ent = entorno_real(infra, "", 0)
+            with self.assertRaises(ErrorEnvio) as cm:
+                ent.correr_opencode("mnemo_payload_1_1.json")
+        self.assertIn("File not found", str(cm.exception))
 
     def test_comando_scp(self):
         c = comando_scp("1.2.3.4", "u", "k", "a.json", "b.json")

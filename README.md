@@ -168,9 +168,9 @@ Contrato Pi↔PC (`sender.py`, sin puertos públicos, RNF-3):
 2. Ciclo `infra` (ping→WoL→wait). Si la PC no arranca: todo queda pendiente y
    Telegram avisa (RNF-4). La PC nunca se toca si ya está arriba (RNF-1).
 3. El prompt largo viaja en **archivo**: `scp mnemo_payload_<trabajo>_<job>.json`
-   al home del usuario de la PC + `opencode run --format json -m <modelo>
-   --dir <EDESSIA_PC_DIR> -f <ruta abs> "<instrucción corta>"`. argv de Windows
-   limita a ~32k chars, el lore no entra.
+   a la carpeta del lore en la PC + `opencode run "<instrucción>" --format json
+   -m <modelo> --dir <EDESSIA_PC_DIR> -f <nombre>`. argv de Windows limita a ~32k
+   chars, el lore no entra.
 4. OpenCode devuelve **Markdown de referencia** (encabezados y prosa, sin
    frontmatter YAML). Solo la **Pi escribe** en `outputs/` (single-writer).
    La trazabilidad va en `<!-- MnemoSlate | fuente: #N | fecha: … -->`.
@@ -206,11 +206,13 @@ contener comillas dobles porque el comando remoto las envuelve.
 - **`-f` adjunta, no es "leé el prompt de acá".** Es "file(s) to attach to
   message": el archivo entero viaja como adjunto. Por eso `INSTRUCCION_CORTA`
   dice explícitamente que el encargo está en el campo `prompt` del JSON.
-- **`-f` se resuelve relativo al `--dir`.** El código hace
-  `path.resolve(--dir ?? root, ruta)`, así que un nombre pelado depositado por
-  `scp` en el home **no se encuentra** (`File not found`). Por eso `-f` recibe
-  `"%USERPROFILE%\mnemo_payload_….json"`: cmd (shell por defecto de sshd) expande
-  la variable y, al ser absoluta, `path.resolve` la respeta.
+- **`-f` se resuelve relativo al `--dir`, y el payload vive ahí.** El código hace
+  `path.resolve(--dir ?? root, ruta)`: `scp` deposita el payload directo en la
+  carpeta del lore (`ruta_payload_en_lore()`) y `-f` recibe el nombre pelado, que
+  resuelve contra el `--dir`. Nada de home, nada de variables de entorno del shell
+  remoto: `%VAR%` solo lo expande cmd, y si el `DefaultShell` de sshd es PowerShell
+  la variable viaja literal y el archivo no existe. El payload se borra tras cada
+  job (`borrar_remoto` en `finally`), así que no ensucia el repo.
 - **Backslashes**: si probás a mano por `ssh` desde la Pi, encerrá el comando
   remoto en comillas **simples** o bash se come los `\`
   (`D:\Docs` → `D:Documents`). El sender no sufre esto porque arma el argv sin
@@ -228,10 +230,14 @@ contener comillas dobles porque el comando remoto las envuelve.
   siempre (opencode#38723, reproducido: colgar 5/5 con fifo, responder 10/10 con
   `/dev/null`). El sender manda `stdin=subprocess.DEVNULL` en las tres llamadas
   (`scp`, `opencode`, limpieza) por eso. En una terminal normal no hace falta.
-- **`EUNKNOWN: unknown error, read` en Windows por `ssh`**: bug de Bun donde la
-  unidad virtual es `B:~BUN\root`. Si existe una unidad `B:` desconectada, una
-  sesión **no elevada** (o sea, la de `ssh`) intenta leer ahí y falla. Comprobá
-  con `net use` y, si está, desconectala o mapeala.
+- **`EUNKNOWN: unknown error, read` en Windows por `ssh`** era el `stdin` abierto
+  (ver punto anterior): con `ssh -n` o `stdin=DEVNULL` opencode bootea normal.
+  Descartado el bug de Bun con la unidad virtual `B:~BUN\root` (esta PC no tiene
+  unidad `B:`; hay C/D/E/N).
+- **opencode escribe sus errores por stdout.** `File not found: ...` sale por
+  `UI.error()` (stdout), no por stderr. Por eso `correr_opencode()` ante exit ≠ 0
+  incluye la cola del stdout en el `ErrorEnvio`: si no, el fallo llega mudo
+  (un `devolvió 1:` sin nada, como pasó en el primer `--test` real).
 
 ### Probar a mano en la PC (sin la Pi)
 

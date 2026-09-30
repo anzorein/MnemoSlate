@@ -4,12 +4,13 @@ Contrato Pi↔PC (ver README "Fase 4: sender"):
 1. Pi: `scp` payload.json (JSON con el prompt de referencia + meta) al home del
    usuario en la PC. El prompt largo viaja en el ARCHIVO, no en argv (Windows
    limita argv a ~32k chars).
-2. Pi: `ssh opencode run --format json [-m modelo] --dir <lore> -f <RUTA_ABS> "<instr>"`.
+2. Pi: `ssh opencode run --format json [-m modelo] --dir <lore> -f <NOMBRE> "<instr>"`.
    Dos trampas de `opencode run` (run.ts): `-f` significa "file(s) to attach to
    message" (ADJUNTA el archivo, no toma el prompt de ahí) y su ruta se resuelve
-   con `path.resolve(--dir ?? root, ruta)`. Por eso `-f` recibe la ruta ABSOLUTA
-   (`%USERPROFILE%` + el nombre del payload): cmd la expande y al ser absoluta
-   ignora el `--dir`.
+   con `path.resolve(--dir ?? root, ruta)`. Por eso el payload se deposita con
+   `scp` DIRECTO en la carpeta del lore y `-f` recibe el nombre pelado: resuelve
+   contra el `--dir` sin depender del shell remoto (nada de `%VAR%`, que solo
+   expande cmd y no PowerShell).
 3. PC: stdout (`--format json`, o texto si algo falla) → la Pi extrae el documento.
 4. Pi (single-writer): `envolver_referencia()` + `guardar_lore(outputs)` → ideas a
    `procesada`, trabajo a `hecho`. OpenCode nunca escribe archivos.
@@ -118,20 +119,22 @@ def comando_scp(host: str, usuario: str, llave: str,
     ]
 
 
-def ruta_payload_absoluta(nombre: str) -> str:
-    """Ruta ABSOLUTA (entrecomillada) del payload para `opencode run -f`.
+def ruta_payload_en_lore(edessia_pc_dir: str, nombre: str) -> str:
+    """Ruta del payload DENTRO de la carpeta del lore en la PC.
 
-    `scp` deposita el payload en el home del usuario de la PC, pero `opencode run`
-    resuelve `-f` con `path.resolve(--dir ?? root, ruta)`: relativo al `--dir`, un
-    nombre pelado no se encuentra. `%USERPROFILE%` lo expande cmd (shell por
-    defecto de sshd en Windows) y, al ser absoluta, `path.resolve` la respeta.
+    `scp` lo deposita ahí y `opencode run -f` recibe el nombre pelado, que
+    resuelve contra el `--dir` (que es esa misma carpeta). Todo queda bajo
+    `<EDESSIA_PC_DIR>`: sin variables de entorno del shell remoto (`%VAR%` solo
+    lo expande cmd, no PowerShell) y sin ensuciar el home del usuario.
+    El archivo se borra tras cada job (`borrar_remoto` en `finally`).
     """
-    return f'"%USERPROFILE%\\{nombre}"'
+    base = edessia_pc_dir.rstrip("\\/")
+    return f"{base}\\{nombre}"
 
 
-def comando_opencode_remoto(edessia_pc_dir: str, payload_remoto: str,
+def comando_opencode_remoto(edessia_pc_dir: str, payload_nombre: str,
                             modelo: str = "") -> str:
-    """Comando que corre EN la PC (cmd). Rutas con espacios entrecomilladas.
+    """Comando que corre EN la PC (cmd o PowerShell: sin sintaxis propia de shell).
 
     El mensaje va PRIMERO y `-f` al ÚLTIMO, a propósito: `-f` es un flag tipo
     array (yargs) que consume glotonamente todo lo que viene detrás hasta el
@@ -139,10 +142,11 @@ def comando_opencode_remoto(edessia_pc_dir: str, payload_remoto: str,
     opencode fallaba con `File not found: El` (la primera palabra del mensaje).
     Con el mensaje primero, `-f` no tiene nada detrás que tragarse.
 
-    `payload_remoto` es el NOMBRE pelado tal como lo deja `scp` en el home.
+    `payload_nombre` es el NOMBRE pelado del archivo, que vive en la carpeta del
+    lore (`ruta_payload_en_lore`): `-f` lo resuelve contra el `--dir`.
     """
     ed = f'"{edessia_pc_dir}"' if " " in edessia_pc_dir else edessia_pc_dir
-    pl = ruta_payload_absoluta(payload_remoto)
+    pl = f'"{payload_nombre}"'  # siempre entrecomillado (vale en cmd y PowerShell)
     modelo_flag = f" -m {modelo}" if modelo.strip() else ""
     return (
         f'opencode run "{INSTRUCCION_CORTA}" --format json{modelo_flag} '
@@ -243,8 +247,8 @@ def entorno_real(infra: InfraSettings, token: str, chat_id: int) -> Entorno:
             detalle = (proc.stderr or b"").decode(errors="replace").strip()
             raise ErrorEnvio(f"scp falló: {detalle or proc.returncode}")
 
-    def correr_opencode(remoto_payload: str) -> str:
-        remoto = comando_opencode_remoto(infra.edessia_pc_dir, remoto_payload,
+    def correr_opencode(nombre_payload: str) -> str:
+        remoto = comando_opencode_remoto(infra.edessia_pc_dir, nombre_payload,
                                          infra.opencode_model)
         try:
             # stdin=DEVNULL es OBLIGATORIO: por `ssh` el stdin remoto es una pipe
@@ -260,7 +264,11 @@ def entorno_real(infra: InfraSettings, token: str, chat_id: int) -> Entorno:
         except subprocess.TimeoutExpired as e:
             raise ErrorEnvio(f"`opencode run` superó {OPENCODE_TIMEOUT:.0f}s.") from e
         if proc.returncode != 0:
-            detalle = (proc.stderr or b"").decode(errors="replace").strip()[-500:]
+            err = (proc.stderr or b"").decode(errors="replace").strip()
+            # opencode escribe sus errores (ej: `File not found: ...`) por STDOUT
+            # via UI.error, no por stderr: sin esto el fallo llegaba mudo.
+            out = (proc.stdout or b"").decode(errors="replace").strip()
+            detalle = err or out[-500:]
             raise ErrorEnvio(f"`opencode run` devolvió {proc.returncode}: {detalle}")
         return (proc.stdout or b"").decode(errors="replace")
 
@@ -324,10 +332,11 @@ def procesar_trabajo(conn: sqlite3.Connection, infra: InfraSettings,
                 "extra": trabajo.extra,
                 "prompt": build_referencia_prompt(ideas, trabajo.extra),  # type: ignore[arg-type]
             }
-            remoto = f"mnemo_payload_{trabajo.id}_{n}.json"
+            nombre = f"mnemo_payload_{trabajo.id}_{n}.json"
+            remoto = ruta_payload_en_lore(infra.edessia_pc_dir, nombre)
             ent.enviar_payload(json.dumps(payload, ensure_ascii=False), remoto)  # type: ignore[operator]
             try:
-                salida = ent.correr_opencode(remoto)  # type: ignore[operator]
+                salida = ent.correr_opencode(nombre)  # type: ignore[operator]
             finally:
                 try:
                     ent.borrar_remoto(remoto)  # type: ignore[operator]
