@@ -168,8 +168,10 @@ def build_referencia_prompt(ideas: Sequence[Idea], extra: str = "") -> str:
         "Desarrollá worldbuilding coherente con el lore de Edessia "
         "(carpetas references/ y wiki/). Si algo contradice el lore, marcá la "
         "discrepancia en el texto y proponé resolución.\n\n"
-        "Formato: Markdown de REFERENCIA (interim), NO el formato scribe ni PDF. "
-        "Usá encabezados y prosa; sin frontmatter YAML.\n\n"
+        "Formato: Markdown de REFERENCIA, NO el formato scribe ni PDF. "
+        "Usá encabezados y prosa; sin frontmatter YAML. "
+        "El título es limpio: solo el nombre de la pieza, sin etiquetas meta "
+        "ni aclaraciones entre paréntesis.\n\n"
         f"IDEAS FUENTE:\n{bloques}\n"
     )
     if extra.strip():

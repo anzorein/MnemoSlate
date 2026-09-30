@@ -263,14 +263,14 @@ contener comillas dobles porque el comando remoto las envuelve.
 ```
 
 ```powershell
-opencode run "El archivo adjunto es un JSON cuyo campo prompt trae el encargo. Desarrolla ese lore y devuelve SOLO el documento final en Markdown de referencia: encabezados y prosa, sin frontmatter, sin vallas de codigo y sin comentarios sobre tu proceso." --format json -m opencode/big-pickle --dir D:\Documentos\Projects\Edessia -f test-payload.json
+opencode run "El archivo adjunto es un JSON cuyo campo prompt trae el encargo. Desarrolla ese lore y devuelve SOLO el documento final en Markdown de referencia: encabezados y prosa, sin frontmatter, sin vallas de codigo y sin comentarios sobre tu proceso y con titulo limpio, sin etiquetas meta." --format json -m opencode/big-pickle --dir D:\Documentos\Projects\Edessia -f test-payload.json
 ```
 
 Desde la Pi por `ssh`, encerrá TODO el comando remoto en comillas **simples**
 (así bash no toca los backslashes ni las comillas dobles internas):
 
 ```bash
-ssh <usuario_pc>@<ip_pc> 'opencode run "El archivo adjunto es un JSON cuyo campo prompt trae el encargo. Desarrolla ese lore y devuelve SOLO el documento final en Markdown de referencia: encabezados y prosa, sin frontmatter, sin vallas de codigo y sin comentarios sobre tu proceso." --format json -m opencode/big-pickle --dir D:\Documentos\Projects\Edessia -f test-payload.json'
+ssh <usuario_pc>@<ip_pc> 'opencode run "El archivo adjunto es un JSON cuyo campo prompt trae el encargo. Desarrolla ese lore y devuelve SOLO el documento final en Markdown de referencia: encabezados y prosa, sin frontmatter, sin vallas de codigo y sin comentarios sobre tu proceso y con titulo limpio, sin etiquetas meta." --format json -m opencode/big-pickle --dir D:\Documentos\Projects\Edessia -f test-payload.json'
 ```
 
 Modelo: `OPENCODE_MODEL` en el `.env` de la Pi (vacío = default de la PC).

@@ -63,11 +63,13 @@ OPENCODE_TIMEOUT = 600.0
 # archivo entero, así que el modelo tiene que saber dónde está el encargo.
 # Sin comillas dobles (el comando remoto las envuelve) ni caracteres que cmd.exe
 # trata como especiales: () & | < > ^ % !
+# Título limpio: el modelo tendía a copiar etiquetas meta del prompt al título
+# (Sesión 21: "# ... (interim reference)").
 INSTRUCCION_CORTA = (
     "El archivo adjunto es un JSON cuyo campo prompt trae el encargo. "
     "Desarrolla ese lore y devuelve SOLO el documento final en Markdown de "
-    "referencia: encabezados y prosa, sin frontmatter, sin vallas de codigo "
-    "y sin comentarios sobre tu proceso."
+    "referencia: encabezados y prosa, sin frontmatter, sin vallas de codigo, "
+    "sin comentarios sobre tu proceso y con titulo limpio, sin etiquetas meta."
 )
 
 # Idea canónica de prueba para `--test`: una escena corta, siempre igual. Vive en

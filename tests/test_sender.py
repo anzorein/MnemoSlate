@@ -315,6 +315,11 @@ class TestSalida(unittest.TestCase):
         # está en el campo `prompt`.
         self.assertIn("prompt", INSTRUCCION_CORTA)
 
+    def test_instruccion_pide_titulo_limpio(self):
+        # Regresión Sesión 21: "# ... (interim reference)" en el título.
+        self.assertIn("titulo limpio", INSTRUCCION_CORTA.lower())
+        self.assertNotIn("interim", INSTRUCCION_CORTA.lower())
+
     def test_payload_vive_en_la_carpeta_del_lore(self):
         # Todo el payload vive bajo <EDESSIA_PC_DIR>: nada de home, nada de
         # variables de entorno del shell remoto (%VAR% solo lo expande cmd).
@@ -527,6 +532,14 @@ class TestReferencia(unittest.TestCase):
         p = build_referencia_prompt([], extra="hola")
         self.assertIn("REFERENCIA", p)
         self.assertIn("hola", p)
+
+    def test_prompt_sin_etiqueta_interim(self):
+        # Regresión Sesión 21: el modelo copió "(interim reference)" al título.
+        # La palabra no puede aparecer en el prompt que viaja a OpenCode
+        # (en docs y comentarios está bien).
+        p = build_referencia_prompt([], extra="")
+        self.assertNotIn("interim", p.lower())
+        self.assertIn("limpio", p.lower())
 
     def test_envolver_referencia_trazabilidad(self):
         doc = envolver_referencia("cuerpo", [], extra="x", nota="trabajo #7 job 1")

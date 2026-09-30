@@ -308,3 +308,16 @@
 - **Pendiente**: re-correr `--test` desde la Pi y verificar que el `.md` arranca
   en la escena.
 
+## 2026-09-30 — Sesión 21 (título limpio: sin etiquetas meta)
+- **Reporte del usuario**: el `.md` ya arranca en la escena, pero el título decía
+  `# Sick Week, Ashbank Row (interim reference)`. El modelo copió la etiqueta
+  `(interim)` del prompt largo (`build_referencia_prompt`).
+- Fix en dos lados: `lore.py` ya no dice `(interim)` y pide título limpio (solo el
+  nombre de la pieza, sin etiquetas meta ni paréntesis); `INSTRUCCION_CORTA` agrega
+  `con titulo limpio, sin etiquetas meta` (sin comillas ni chars hostiles de cmd).
+  Comandos manuales del README sincronizados con la constante.
+- Tests: `test_prompt_sin_etiqueta_interim`, `test_instruccion_pide_titulo_limpio`.
+  **Suite: 108/108 OK.**
+- **Idea custom propuesta** para `TEST_IDEA`/`TEST_TITULO` (ley de nombres): ver
+  mensaje de la sesión.
+
