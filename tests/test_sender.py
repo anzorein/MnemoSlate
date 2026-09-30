@@ -466,6 +466,23 @@ class TestCLI(unittest.TestCase):
         self.assertIn(IDEA_PRUEBA[:30], payload)  # se usó la idea canónica
         tmp.cleanup()
 
+    def test_test_usa_idea_configurable(self):
+        # TEST_IDEA/TEST_TITULO pisan la canónica sin tocar código.
+        tmp = tempfile.TemporaryDirectory()
+        root = Path(tmp.name)
+        infra = _infra(root, test_idea="una taberna en el puerto bajo",
+                       test_titulo="taberna-puerto")
+        f = Fakes()
+        rc = _probar_pipeline(infra, f.entorno())
+        self.assertEqual(rc, SALIDA_OK)
+        archivos = list((root / "outputs").glob("test-*.md"))
+        self.assertEqual(len(archivos), 1)
+        self.assertIn("taberna-puerto", archivos[0].name)
+        payload, _ = f.salidas[0]
+        self.assertIn("una taberna en el puerto bajo", payload)
+        self.assertNotIn(IDEA_PRUEBA[:30], payload)
+        tmp.cleanup()
+
     def test_ejecutar_cli_test_usa_db_temporal(self):
         tmp = tempfile.TemporaryDirectory()
         root = Path(tmp.name)

@@ -264,3 +264,13 @@
   Tests nuevos: formato, bloque en mensaje+aviso, `--test` sin línea de apagado,
   fallo con tiempo. **Suite: 100/100 OK.**
 
+## 2026-09-30 — Sesión 18 (idea del `--test` configurable)
+- **Pedido del usuario**: poder cambiar el prompt del `--test` sin editar código.
+- Nuevas vars `TEST_IDEA`/`TEST_TITULO` en `config.py` + `.env.example` (una sola
+  línea cada una). Vacías = la canónica (`IDEA_PRUEBA`/`TITULO_PRUEBA` en
+  `sender.py`, única fuente de verdad: `config.py` no la importa para evitar ciclo).
+- `_probar_pipeline()` usa `infra.test_idea/test_titulo` con fallback a la canónica.
+- Test nuevo: `test_test_usa_idea_configurable` (payload y nombre con los valores
+  custom, canónica ausente). **Suite: 101/101 OK.**
+- **Pendiente**: `pull` en la Pi; el usuario ya corre `--test` reales exitosos.
+

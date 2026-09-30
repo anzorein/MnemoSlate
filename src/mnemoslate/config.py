@@ -45,6 +45,10 @@ class InfraSettings:
     claim_timeout_min: int = 30   # anti-zombi: reencolar enviados sin resultado
     max_intentos: int = 3         # pasados N intentos el trabajo va a 'error'
     apagar_al_finalizar: bool = True  # False = jamás apagar (seguro para tests)
+    # Idea/título para `--test`. Vacío = la canónica (IDEA_PRUEBA/TITULO_PRUEBA
+    # en sender.py, única fuente de verdad: config no puede importarla sin ciclo).
+    test_idea: str = ""
+    test_titulo: str = ""
 
 
 def _buscar_env(root: Path | None) -> None:
@@ -105,6 +109,8 @@ def load_infra_settings(root: Path | None = None) -> InfraSettings:
         scribe_dir=os.getenv("SCRIBE_DIR", "scribe").strip(),
         claim_timeout_min=int(os.getenv("CLAIM_TIMEOUT_MIN", "30")),
         max_intentos=int(os.getenv("MAX_INTENTOS", "3")),
+        test_idea=os.getenv("TEST_IDEA", "").strip(),
+        test_titulo=os.getenv("TEST_TITULO", "").strip(),
         apagar_al_finalizar=os.getenv("APAGAR_AL_FINALIZAR", "1").strip().lower()
         not in ("0", "false", "no", "off"),
     )

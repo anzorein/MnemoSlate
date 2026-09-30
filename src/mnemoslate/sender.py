@@ -456,17 +456,23 @@ SALIDA_ERROR = 2
 
 
 def _probar_pipeline(infra: InfraSettings, entorno: Entorno | None = None) -> int:
-    """--test autocontenido: DB temporal + idea canónica, sin apagar la PC."""
+    """--test autocontenido: DB temporal + idea canónica, sin apagar la PC.
+
+    La idea y el título salen de `TEST_IDEA`/`TEST_TITULO` si están seteados;
+    si no, se usa la canónica (`IDEA_PRUEBA`/`TITULO_PRUEBA`).
+    """
+    idea_texto = infra.test_idea.strip() or IDEA_PRUEBA
+    titulo = infra.test_titulo.strip() or TITULO_PRUEBA
     with tempfile.TemporaryDirectory(prefix="mnemoslate_test_") as tmp:
         conn = init_db(Path(tmp) / "test.db")
         try:
-            idea_id = crear_idea(conn, 0, IDEA_PRUEBA)
+            idea_id = crear_idea(conn, 0, idea_texto)
             encolar_trabajo(conn, 0, [[idea_id]], extra="")
             ent = entorno or entorno_real(infra, "", 0)
             ent.notificar = lambda texto: print(f"[notify] {texto}")  # type: ignore[method-assign]
             res = procesar_trabajo(conn, infra, "", 0, ent,
                                    forzar_sin_apagar=True, prefijo="test-",
-                                   titulo_forzado=TITULO_PRUEBA)
+                                   titulo_forzado=titulo)
         finally:
             conn.close()
     print(res.mensaje)

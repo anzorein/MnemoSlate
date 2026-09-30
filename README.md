@@ -191,10 +191,14 @@ python -m mnemoslate.sender --test
 
 Corre el pipeline **real** (ping → WoL → scp → `opencode run`) pero:
 
-- usa una **DB temporal** con la idea canónica `IDEA_PRUEBA` (nunca toca `data/ideas.db`);
+- usa una **DB temporal** con la idea de prueba (nunca toca `data/ideas.db`);
 - escribe en el `outputs/` real con prefijo `test-`
   (`test-YYYY-MM-DD-escena-clases-sociales.md`);
 - **nunca apaga la PC**.
+
+La idea y el título salen de `TEST_IDEA`/`TEST_TITULO` del `.env` (una sola línea
+cada uno); vacíos = la canónica (`IDEA_PRUEBA`: escena de clases sociales,
+~200 palabras).
 
 `--procesar` es el ciclo completo sobre la DB real (y ahí sí vale `APAGAR_AL_FINALIZAR`).
 
