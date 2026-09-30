@@ -222,6 +222,16 @@ contener comillas dobles porque el comando remoto las envuelve.
   sender emite el mensaje **primero** y deja `-f` **al final** (último token).
 - **La instrucción evita caracteres especiales de cmd** (`( ) & | < > ^ % !`), que
   el shell remoto interpretaría. Hay un test que lo vigila.
+- **`stdin` cerrado (`DEVNULL`) en toda llamada por `ssh`.** Por `ssh`, el stdin
+  remoto es una pipe que nunca cierra, y `opencode run` hace
+  `await Bun.stdin.text()` cuando stdin no es TTY: se queda esperando EOF para
+  siempre (opencode#38723, reproducido: colgar 5/5 con fifo, responder 10/10 con
+  `/dev/null`). El sender manda `stdin=subprocess.DEVNULL` en las tres llamadas
+  (`scp`, `opencode`, limpieza) por eso. En una terminal normal no hace falta.
+- **`EUNKNOWN: unknown error, read` en Windows por `ssh`**: bug de Bun donde la
+  unidad virtual es `B:~BUN\root`. Si existe una unidad `B:` desconectada, una
+  sesión **no elevada** (o sea, la de `ssh`) intenta leer ahí y falla. Comprobá
+  con `net use` y, si está, desconectala o mapeala.
 
 ### Probar a mano en la PC (sin la Pi)
 

@@ -236,7 +236,7 @@ def entorno_real(infra: InfraSettings, token: str, chat_id: int) -> Entorno:
         try:
             proc = subprocess.run(
                 comando_scp(infra.pc_ip, infra.ssh_user, infra.ssh_key, local, remoto),
-                capture_output=True, timeout=60)
+                capture_output=True, stdin=subprocess.DEVNULL, timeout=60)
         finally:
             Path(local).unlink(missing_ok=True)
         if proc.returncode != 0:
@@ -247,9 +247,14 @@ def entorno_real(infra: InfraSettings, token: str, chat_id: int) -> Entorno:
         remoto = comando_opencode_remoto(infra.edessia_pc_dir, remoto_payload,
                                          infra.opencode_model)
         try:
+            # stdin=DEVNULL es OBLIGATORIO: por `ssh` el stdin remoto es una pipe
+            # que nunca cierra, y `opencode run` hace `await Bun.stdin.text()` con
+            # stdin no-TTY → se queda esperando EOF para siempre (opencode#38723).
+            # Con stdin a /dev/null responde siempre.
             proc = subprocess.run(
                 comando_ssh_generico(infra.pc_ip, infra.ssh_user, infra.ssh_key, remoto),
-                capture_output=True, timeout=OPENCODE_TIMEOUT)
+                capture_output=True, stdin=subprocess.DEVNULL,
+                timeout=OPENCODE_TIMEOUT)
         except FileNotFoundError as e:
             raise ErrorEnvio("Sin cliente `ssh` en la Pi.") from e
         except subprocess.TimeoutExpired as e:
@@ -268,7 +273,7 @@ def entorno_real(infra: InfraSettings, token: str, chat_id: int) -> Entorno:
             subprocess.run(
                 comando_ssh_generico(infra.pc_ip, infra.ssh_user, infra.ssh_key,
                                      f'del "{remoto}"'),
-                capture_output=True, timeout=30)
+                capture_output=True, stdin=subprocess.DEVNULL, timeout=30)
         except Exception as e:  # noqa: BLE001
             log.warning("No se pudo borrar %s en la PC: %s", remoto, e)
 

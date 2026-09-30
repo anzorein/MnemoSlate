@@ -1,5 +1,6 @@
 """Tests del sender Fase 4 (sin hardware: Entorno fake)."""
 import os
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -38,6 +39,7 @@ from mnemoslate.sender import (  # noqa: E402
     comando_scp,
     ejecutar_cli,
     extraer_texto_salida,
+    entorno_real,
     procesar_trabajo,
     ruta_payload_absoluta,
 )
@@ -255,6 +257,33 @@ class TestSalida(unittest.TestCase):
         # cmd.exe trata estos como especiales: romperian el comando remoto.
         for ch in "()&|<>^%!\r\n":
             self.assertNotIn(ch, INSTRUCCION_CORTA, f"caracter hostil: {ch!r}")
+
+    def test_stdin_cerrado_en_toda_llamada_ssh(self):
+        # Regresión: por ssh el stdin remoto es una pipe que nunca cierra y
+        # `opencode run` hace `await Bun.stdin.text()` con stdin no-TTY → cuelga
+        # para siempre (opencode#38723). Todo subprocess por ssh va con DEVNULL.
+        infra = InfraSettings(pc_mac="11:22:33:44:55:66", pc_ip="192.0.2.15",
+                              ssh_user="u", ssh_key="k")
+        llamadas = []
+
+        class Proc:
+            returncode = 0
+            stdout = b'{"text":"hola"}'
+            stderr = b""
+
+        def fake_run(argv, **kw):
+            llamadas.append((argv, kw))
+            return Proc()
+
+        with patch("mnemoslate.sender.subprocess.run", side_effect=fake_run):
+            ent = entorno_real(infra, "", 0)
+            ent.enviar_payload("{}", "p.json")
+            ent.correr_opencode("p.json")
+            ent.borrar_remoto("p.json")
+        self.assertEqual(len(llamadas), 3)
+        for argv, kw in llamadas:
+            self.assertEqual(kw.get("stdin"), subprocess.DEVNULL,
+                             f"falta stdin=DEVNULL en {argv}")
 
     def test_instruccion_no_rompe_el_comando_remoto(self):
         # El comando remoto entrecomilla la instrucción: unas comillas dobles

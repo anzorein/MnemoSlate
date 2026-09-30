@@ -205,3 +205,20 @@
 - **Pendiente inmediato**: ver la salida real de `opencode run --format json` con
   Big Pickle para fijar `extraer_texto_salida()`.
 
+## 2026-09-29 — Sesión 15 (stdin por ssh: cuelgue silencioso de `opencode run`)
+- **Bug REAL del pipeline, encontrado por investigación (aún no observado en el
+  `--test` porque el e2e nunca llegó a la llamada remota)**: por `ssh`, el stdin
+  remoto es una pipe cuyo extremo escritor nunca cierra. `opencode run` ejecuta
+  `await Bun.stdin.text()` cuando stdin no es TTY → **se queda esperando EOF para
+  siempre** (opencode#38723; medido: cuelga 5/5 con fifo, responde 10/10 con
+  `/dev/null`). En el sender eso era un timeout de 600s por cada job.
+- Fix: `stdin=subprocess.DEVNULL` en las **tres** llamadas por ssh (`scp` del
+  payload, `opencode run`, `del` de limpieza). Test que verifica las tres.
+- **Diagnóstico del `EUNKNOWN: unknown error, read` que reportó el usuario por
+  `ssh`**: NO es el bug de la unidad `B:` de Bun (esta PC no tiene `B:`; hay
+  C/D/E/N). Comprobado en esta misma PC que `opencode 1.18.33` +
+  `opencode/big-pickle` funcionan y responden bien en local. O sea: el fallo es
+  del entorno de la sesión `ssh` (no interactiva/no elevada), no del modelo ni de
+  los argumentos. Queda pendiente el log de esa sesión.
+- **Suite: 94/94 OK.**
+
