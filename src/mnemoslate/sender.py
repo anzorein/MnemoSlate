@@ -15,6 +15,8 @@ Contrato Pi↔PC (ver README "Fase 4: sender"):
 4. Pi (single-writer): `envolver_referencia()` + `guardar_lore(outputs)` → ideas a
    `procesada`, trabajo a `hecho`. OpenCode nunca escribe archivos.
    La salida es Markdown de REFERENCIA (interim): scribe/PDF queda para más adelante.
+   La traza del proceso (pasos, herramientas, archivos leídos) va a un sidecar
+   `<mismo-nombre>-thoughts.md`, NO en el documento principal.
 5. Pi notifica por Bot API y apaga la PC (RF-2.4). Si la PC no arranca, todo queda
    `pendiente`/`encolado` (RNF-4) y el usuario recibe la alerta.
 
@@ -34,6 +36,7 @@ import time
 import urllib.parse
 import urllib.request
 from dataclasses import dataclass, field
+from datetime import date
 from pathlib import Path
 
 from .config import InfraSettings, load_infra_settings
@@ -188,6 +191,87 @@ def _juntar_texto(obj: object, salida: list[str]) -> None:
     elif isinstance(obj, list):
         for item in obj:
             _juntar_texto(item, salida)
+
+
+def eventos_json(stdout: str) -> list[dict]:
+    """Líneas JSON de `opencode run --format json` parseadas (ignora el resto)."""
+    eventos: list[dict] = []
+    for linea in stdout.splitlines():
+        linea = linea.strip()
+        if not linea.startswith("{"):
+            continue
+        try:
+            obj = json.loads(linea)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(obj, dict):
+            eventos.append(obj)
+    return eventos
+
+
+def _recortar(texto: str, largo: int = 500) -> str:
+    """Una línea, recortada con marca (para no duplicar el lore en thoughts)."""
+    una_linea = " ".join(texto.split())
+    if len(una_linea) <= largo:
+        return una_linea
+    return una_linea[:largo].rstrip() + "…(recortado)"
+
+
+def extraer_pensamiento(stdout: str, nota: str = "") -> str:
+    """Traza legible del proceso de OpenCode (qué leyó/hizo para llegar).
+
+    Incluye pasos y llamadas a herramientas (entradas + salidas RECORTADAS: el
+    contenido completo de los archivos ya vive en el lore, no se duplica).
+    EXCLUYE los eventos de texto: esos son el documento y van en el `.md`
+    principal. Devuelve "" si no hay traza (stdout plano) → no se guarda archivo.
+    """
+    eventos = eventos_json(stdout)
+    if not eventos:
+        return ""
+    sesion = next((e.get("sessionID", "") for e in eventos if e.get("sessionID")), "")
+    lineas = []
+    for e in eventos:
+        tipo = e.get("type", "?")
+        parte = e.get("part") if isinstance(e.get("part"), dict) else {}
+        if tipo == "text":
+            continue  # el documento va en el archivo principal
+        if tipo == "step_start":
+            lineas.append("- paso iniciado")
+        elif tipo == "step_finish":
+            motivo = parte.get("reason", "?")
+            extra = ""
+            tok = parte.get("tokens", {})
+            if isinstance(tok, dict) and tok.get("total"):
+                extra = f" (tokens: {tok.get('total')})"
+            lineas.append(f"- paso terminado (motivo: {motivo}){extra}")
+        elif tipo == "tool_use":
+            herramienta = parte.get("tool", "?")
+            estado = parte.get("state", {}) or {}
+            entrada = estado.get("input", {})
+            if isinstance(entrada, dict) and entrada.get("filePath"):
+                detalle_in = str(entrada["filePath"])
+            else:
+                detalle_in = _recortar(json.dumps(entrada, ensure_ascii=False), 300)
+            linea = f"- herramienta `{herramienta}`: {detalle_in}"
+            if estado.get("status"):
+                linea += f" [{estado['status']}]"
+            salida_herr = estado.get("output", "")
+            if isinstance(salida_herr, str) and salida_herr.strip():
+                linea += f"\n  salida: {_recortar(salida_herr)}"
+            lineas.append(linea)
+        else:
+            lineas.append(f"- evento `{tipo}`: "
+                          f"{_recortar(json.dumps(e, ensure_ascii=False), 200)}")
+    if not lineas:
+        return ""
+    partes = [f"sesión: {sesion or '?'}", f"fecha: {date.today().isoformat()}"]
+    if nota:
+        partes.append(nota)
+    cabecera = "<!-- MnemoSlate-thoughts | " + " | ".join(partes) + " -->"
+    return (f"{cabecera}\n\n# Proceso (thoughts)\n\n"
+            "Traza de lo que hizo OpenCode para llegar al resultado. "
+            "El documento final está en el `.md` principal.\n\n"
+            + "\n".join(lineas) + "\n")
 
 
 def formatear_duracion(seg: float) -> str:
@@ -386,6 +470,14 @@ def procesar_trabajo(conn: sqlite3.Connection, infra: InfraSettings,
             tiempos.append((f"job {n}: guardado en outputs",
                             time.monotonic() - t_save))
             archivos.append(str(ruta))
+            # Sidecar con la traza del proceso (qué leyó/hizo OpenCode). Solo si
+            # hay traza real: con stdout plano no se genera archivo.
+            pensamiento = extraer_pensamiento(
+                salida, nota=f"trabajo #{trabajo.id} job {n}")
+            if pensamiento.strip():
+                ruta_th = guardar_lore(Path(infra.outputs_dir), titulo + "-thoughts",
+                                       pensamiento, categoria=None, prefijo=prefijo)
+                archivos.append(str(ruta_th))
     except ErrorEnvio as e:
         if trabajo.intentos >= infra.max_intentos:
             marcar_trabajo(conn, trabajo.id, "error")

@@ -274,3 +274,19 @@
   custom, canónica ausente). **Suite: 101/101 OK.**
 - **Pendiente**: `pull` en la Pi; el usuario ya corre `--test` reales exitosos.
 
+## 2026-09-30 — Sesión 19 (sidecar `-thoughts`: la traza fuera del documento)
+- **Pedido del usuario**: el `.md` traía TODO el razonamiento previo y lo que el
+  modelo había mirado; eso va a un archivo separado, mismo nombre + `thoughts`.
+- Nueva `extraer_pensamiento()` en `sender.py`: parsea los eventos `--format json`
+  y renderiza la traza (pasos con motivo/tokens, `tool_use` con entradas y salidas
+  **recortadas a 500 chars** para no duplicar el lore, fallback genérico para otros
+  eventos). **Excluye los eventos de texto** (son el documento) y devuelve `""`
+  con stdout plano → en ese caso no se genera archivo.
+- `procesar_trabajo()` guarda por job el documento + `<titulo>-thoughts.md` en
+  `outputs/` (mismo `prefijo`, p. ej. `test-…-thoughts.md`); ambos van en `archivos`
+  y salen en el aviso ✅.
+- Tests: `test_pensamiento_separa_traza_del_documento` (documento no duplicado,
+  traza con tool/path/motivo/tokens y recorte), `test_pensamiento_vacio_sin_traza`,
+  `test_sidecar_thoughts_por_job` (2 archivos por job, ambos existen). Los tests
+  viejos con salida plana siguen dando los mismos conteos. **Suite: 104/104 OK.**
+

@@ -40,6 +40,7 @@ from mnemoslate.sender import (  # noqa: E402
     ejecutar_cli,
     extraer_texto_salida,
     entorno_real,
+    extraer_pensamiento,
     formatear_duracion,
     procesar_trabajo,
     ruta_payload_en_lore,
@@ -47,6 +48,19 @@ from mnemoslate.sender import (  # noqa: E402
 
 SCRIBE_OK = "title (X)\n# X ((X))\n\n## Resumen ((+Resumen))\n\ntexto.\n"
 JSON_OK = '{"type":"x","text":"title (Y)"}\n{"nada":[1]}\n{"content":"cuerpo"}\n'
+JSON_TRAZA = (
+    '{"type":"step_start","sessionID":"ses_1",'
+    ' "part":{"type":"step-start"}}\n'
+    '{"type":"tool_use","sessionID":"ses_1",'
+    ' "part":{"type":"tool","tool":"read","callID":"c1",'
+    ' "state":{"status":"completed",'
+    ' "input":{"filePath":"D:\\\\wiki\\\\04-society.md"},'
+    ' "output":"' + "x" * 2000 + '"}}}\n'
+    '{"type":"text","sessionID":"ses_1",'
+    ' "part":{"type":"text","text":"EL DOCUMENTO FINAL"}}\n'
+    '{"type":"step_finish","sessionID":"ses_1",'
+    ' "part":{"reason":"stop","tokens":{"total":999}}}\n'
+)
 
 
 class Fakes:
@@ -206,6 +220,52 @@ class TestSalida(unittest.TestCase):
     def test_fallback_crudo(self):
         self.assertEqual(extraer_texto_salida("  texto plano  "), "texto plano")
         self.assertEqual(extraer_texto_salida(""), "")
+
+    def test_pensamiento_separa_traza_del_documento(self):
+        doc = extraer_texto_salida(JSON_TRAZA)
+        th = extraer_pensamiento(JSON_TRAZA, nota="trabajo #7 job 1")
+        self.assertIn("EL DOCUMENTO FINAL", doc)
+        # el documento NO se duplica en la traza
+        self.assertNotIn("EL DOCUMENTO FINAL", th)
+        self.assertIn("MnemoSlate-thoughts", th)
+        self.assertIn("trabajo #7 job 1", th)
+        self.assertIn("read", th)
+        self.assertIn(r"D:\wiki\04-society.md", th)
+        self.assertIn("stop", th)
+        self.assertIn("999", th)
+        # la salida de la herramienta (2000 x) va recortada, no entera
+        self.assertIn("recortado", th)
+        self.assertLess(len(th), len(JSON_TRAZA))
+
+    def test_pensamiento_vacio_sin_traza(self):
+        self.assertEqual(extraer_pensamiento("  texto plano  "), "")
+        self.assertEqual(extraer_pensamiento(""), "")
+
+    def test_sidecar_thoughts_por_job(self):
+        tmp = tempfile.TemporaryDirectory()
+        root = Path(tmp.name)
+        conn = init_db(root / "t.db")
+        try:
+            a = crear_idea(conn, 1, "idea con traza")
+            encolar_trabajo(conn, 1, [[a]])
+            f = Fakes(salida=JSON_TRAZA)
+            res = procesar_trabajo(conn, _infra(root), "tok", 1, f.entorno())
+        finally:
+            conn.close()
+        self.assertTrue(res.ok)
+        self.assertEqual(len(res.archivos), 2)
+        principal = [p for p in res.archivos if "thoughts" not in p]
+        lateral = [p for p in res.archivos if p.endswith("-thoughts.md")]
+        self.assertEqual(len(principal), 1)
+        self.assertEqual(len(lateral), 1)
+        for p in res.archivos:
+            self.assertTrue(Path(p).exists())
+        th_txt = Path(lateral[0]).read_text(encoding="utf-8")
+        self.assertIn("read", th_txt)
+        doc_txt = Path(principal[0]).read_text(encoding="utf-8")
+        self.assertIn("EL DOCUMENTO FINAL", doc_txt)
+        self.assertNotIn("herramienta", doc_txt)
+        tmp.cleanup()
 
     def test_comando_opencode(self):
         c = comando_opencode_remoto(r"D:\Documentos\Projects\Edessia", "p_1_1.json",

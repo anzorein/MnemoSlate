@@ -176,6 +176,9 @@ Contrato Pi↔PC (`sender.py`, sin puertos públicos, RNF-3):
    La trazabilidad va en `<!-- MnemoSlate | fuente: #N | fecha: … -->`.
    El formato **scribe** (`scribe_markdown_reference.md`) queda reservado para
    cuando el material esté pulido y se quiera pasar a `scribe/` → PDF.
+   La traza del proceso (pasos, herramientas, archivos leídos, tokens) NO va en
+   el documento: va a un sidecar `<mismo-nombre>-thoughts.md` con salidas
+   recortadas. Con stdout plano (sin eventos JSON) no se genera sidecar.
 5. Ideas a `procesada`, trabajo a `hecho`, Telegram `✅` con rutas **y tiempos por
    paso** (`ciclo PC`, `scp`, `opencode run`, `guardado`, `Total`; ante fallo, el
    tiempo transcurrido), y apagado **solo si el ciclo la encendió**
