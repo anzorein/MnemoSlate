@@ -159,38 +159,30 @@ def comando_opencode_remoto(edessia_pc_dir: str, payload_nombre: str,
 
 
 def extraer_texto_salida(stdout: str) -> str:
-    """Extrae el documento de `opencode run --format json` (defensivo).
+    """Extrae el documento de `opencode run --format json`.
 
-    Intenta parsear eventos JSON por línea y juntar campos de texto; si nada
-    parsea, devuelve el stdout crudo. El formato exacto de eventos se fija en
-    el e2e real (ver README); esta función ya tolera ambos.
+    Solo toma partes con `"type": "text"` (mensajes del asistente). Todo lo demás
+    se ignora: antes se juntaban las claves `output`/`content` de TODO el objeto
+    y las salidas de herramientas (`glob`, `grep`, `read`) terminaban pegadas en
+    el documento (Sesión 20: el `.md` arrancaba con listados del lore).
+    Sin JSON: devuelve el stdout crudo. JSON sin partes de texto: "" (el llamador
+    lo trata como "sin documento" → `ErrorEnvio` → reintento).
     """
-    textos: list[str] = []
-    for linea in stdout.splitlines():
-        linea = linea.strip()
-        if not linea.startswith("{"):
+    textos = []
+    hay_json = False
+    for evento in eventos_json(stdout):
+        hay_json = True
+        parte = evento.get("part")
+        if not isinstance(parte, dict) or parte.get("type") != "text":
             continue
-        try:
-            obj = json.loads(linea)
-        except json.JSONDecodeError:
-            continue
-        _juntar_texto(obj, textos)
+        texto = parte.get("text", "")
+        if isinstance(texto, str) and texto.strip():
+            textos.append(texto)
     if textos:
         return "\n".join(textos).strip()
+    if hay_json:
+        return ""
     return stdout.strip()
-
-
-def _juntar_texto(obj: object, salida: list[str]) -> None:
-    if isinstance(obj, dict):
-        for clave, valor in obj.items():
-            if clave in ("text", "content", "output", "message") and isinstance(valor, str):
-                if valor.strip():
-                    salida.append(valor)
-            else:
-                _juntar_texto(valor, salida)
-    elif isinstance(obj, list):
-        for item in obj:
-            _juntar_texto(item, salida)
 
 
 def eventos_json(stdout: str) -> list[dict]:

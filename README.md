@@ -205,8 +205,12 @@ cada uno); vacíos = la canónica (`IDEA_PRUEBA`: escena de clases sociales,
 
 `--procesar` es el ciclo completo sobre la DB real (y ahí sí vale `APAGAR_AL_FINALIZAR`).
 
-Supuesto pendiente de fijar con el e2e real: el parseo de eventos `--format json`
-(`extraer_texto_salida()` ya tolera JSON y texto crudo). La instrucción corta que
+Formato `--format json` (fijado con el e2e real): el documento viaja en partes
+`{"type":"text", "part":{"type":"text", "text":"..."}}` y `extraer_texto_salida()`
+**solo** toma esas. Las salidas de herramientas (`glob`/`grep`/`read`) se ignoran
+para el documento (van recortadas al sidecar `-thoughts`): antes se juntaban sus
+`output` y el `.md` arrancaba con listados del lore. JSON sin texto → `""` →
+reintento. La instrucción corta que
 viaja en argv (`INSTRUCCION_CORTA`) pide **Markdown de referencia**; no puede
 contener comillas dobles porque el comando remoto las envuelve.
 

@@ -1,4 +1,5 @@
 """Tests del sender Fase 4 (sin hardware: Entorno fake)."""
+import json
 import os
 import subprocess
 import sys
@@ -47,7 +48,19 @@ from mnemoslate.sender import (  # noqa: E402
 )
 
 SCRIBE_OK = "title (X)\n# X ((X))\n\n## Resumen ((+Resumen))\n\ntexto.\n"
-JSON_OK = '{"type":"x","text":"title (Y)"}\n{"nada":[1]}\n{"content":"cuerpo"}\n'
+# Forma REAL de `opencode run --format json` (ver salida.txt del e2e manual):
+# el documento viaja en partes `type=text`; las salidas de herramientas NO.
+JSON_OK = "\n".join(json.dumps(e, ensure_ascii=False) for e in [
+    {"type": "step_start", "sessionID": "ses_1", "part": {"type": "step-start"}},
+    {"type": "tool_use", "sessionID": "ses_1",
+     "part": {"type": "tool", "tool": "grep", "callID": "c1",
+              "state": {"status": "completed", "input": {"pattern": "imperio"},
+                        "output": "Found 39 matches\nwiki/04-society.md:\n Line 48: ..."}}},
+    {"type": "text", "sessionID": "ses_1",
+     "part": {"type": "text", "text": "LA ESCENA"}},
+    {"type": "step_finish", "sessionID": "ses_1",
+     "part": {"reason": "stop", "tokens": {"total": 999}}},
+])
 JSON_TRAZA = (
     '{"type":"step_start","sessionID":"ses_1",'
     ' "part":{"type":"step-start"}}\n'
@@ -213,9 +226,24 @@ class TestSender(unittest.TestCase):
 
 class TestSalida(unittest.TestCase):
     def test_json_lines(self):
+        self.assertEqual(extraer_texto_salida(JSON_OK), "LA ESCENA")
+
+    def test_excluye_salidas_de_herramientas(self):
+        # Regresión Sesión 20: el .md arrancaba con listados del lore (glob) y
+        # resultados de grep porque se juntaban los `output` de los tool_use.
         txt = extraer_texto_salida(JSON_OK)
-        self.assertIn("title (Y)", txt)
-        self.assertIn("cuerpo", txt)
+        self.assertNotIn("Found 39 matches", txt)
+        self.assertNotIn("04-society", txt)
+        self.assertNotIn("step-start", txt)
+
+    def test_json_sin_texto_da_vacio(self):
+        # JSON con solo traza (sin documento) → "" → ErrorEnvio → reintento,
+        # en vez de inventar un documento con salidas de herramientas.
+        solo_traza = "\n".join(json.dumps(e) for e in [
+            {"type": "step_start", "part": {"type": "step-start"}},
+            {"type": "step_finish", "part": {"reason": "stop"}},
+        ])
+        self.assertEqual(extraer_texto_salida(solo_traza), "")
 
     def test_fallback_crudo(self):
         self.assertEqual(extraer_texto_salida("  texto plano  "), "texto plano")

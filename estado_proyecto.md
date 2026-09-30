@@ -290,3 +290,21 @@
   `test_sidecar_thoughts_por_job` (2 archivos por job, ambos existen). Los tests
   viejos con salida plana siguen dando los mismos conteos. **Suite: 104/104 OK.**
 
+## 2026-09-30 — Sesión 20 (el parser cosechaba salidas de herramientas)
+- **Reporte del usuario con evidencia**: el `.md` arrancaba con listados del lore
+  (dos `glob` enteros) + un `grep` (`Found 39 matches` con extractos) antes de la
+  escena. NO era cháchara del modelo: exploró bien el lore; el bug era nuestro.
+- Causa: `extraer_texto_salida()` juntaba las claves `text`/`content`/`output`/
+  `message` de TODO el objeto, incluidos los `output` de los `tool_use`. El fixture
+  `test_json_lines` usaba una forma inventada que escondía el bug.
+- Fix: solo se toman partes con `"type": "text"` (forma real fijada con el e2e:
+  `{"type":"text", "part":{"type":"text", "text":"..."}}`). Sin JSON → stdout crudo
+  (como antes). JSON sin texto → `""` → `ErrorEnvio` → reintento, en vez de inventar
+  un documento. Se eliminó `_juntar_texto()` (quedó sin uso).
+- Tests: `JSON_OK` reescrito con la forma real (step + tool_use con `output` +
+  text + finish); `test_json_lines` ahora exige SOLO el texto;
+  `test_excluye_salidas_de_herramientas`; `test_json_sin_texto_da_vacio`.
+  **Suite: 106/106 OK.**
+- **Pendiente**: re-correr `--test` desde la Pi y verificar que el `.md` arranca
+  en la escena.
+
