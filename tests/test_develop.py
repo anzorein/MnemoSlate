@@ -5,7 +5,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from mnemoslate.develop import ParseError, parse_desarrollar  # noqa: E402
+from mnemoslate.develop import ParseError, parse_desarrollar, parse_seguir  # noqa: E402
 
 
 class TestParser(unittest.TestCase):
@@ -58,6 +58,19 @@ class TestParser(unittest.TestCase):
         for malo in ["", "   ", "& solo extra", "#", "#12 +", "+ #5", "#0", "hola"]:
             with self.assertRaises(ParseError, msg=malo):
                 parse_desarrollar(malo)
+
+
+class TestSeguir(unittest.TestCase):
+    def test_ok(self):
+        self.assertEqual(parse_seguir("#42 que cambie el final"),
+                         (42, "que cambie el final"))
+        self.assertEqual(parse_seguir("  #7   espacios   de   más  "),
+                         (7, "espacios   de   más"))
+
+    def test_errores(self):
+        for malo in ["", "   ", "#", "#x hola", "42 hola", "#42", "#42   "]:
+            with self.assertRaises(ValueError, msg=malo):
+                parse_seguir(malo)
 
 
 if __name__ == "__main__":

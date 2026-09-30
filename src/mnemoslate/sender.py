@@ -43,11 +43,13 @@ from pathlib import Path
 from .config import InfraSettings, load_infra_settings
 from .db import (
     Trabajo,
+    avanzar_hilo,
     cambiar_estado,
     crear_idea,
     encolar_trabajo,
     init_db,
     marcar_trabajo,
+    obtener_hilo,
     obtener_idea,
     reclamar_trabajo,
 )
@@ -72,6 +74,19 @@ INSTRUCCION_CORTA = (
     "referencia: encabezados y prosa, sin frontmatter, sin vallas de codigo, "
     "sin explicacion ni proceso, solo la pieza, y arranca con su titulo en "
     "una linea que empieza con numeral y espacio, titulo limpio."
+)
+
+# Instrucción para las vueltas de /seguir: el encargo viene en el campo `extra`
+# (feedback del usuario) y las reglas en `prompt`. El modelo YA tiene el contexto
+# porque la sesión se reanuda con --session. Mismas restricciones que la corta:
+# sin comillas dobles ni caracteres hostiles de cmd, ASCII sin acentos.
+INSTRUCCION_SEGUIMIENTO = (
+    "El archivo adjunto es un JSON cuyo campo extra trae el encargo de esta vuelta "
+    "y cuyo campo prompt trae las reglas. Aplica el encargo sobre lo ya trabajado "
+    "en esta sesion y devuelve SOLO la pieza completa actualizada en Markdown de "
+    "referencia: encabezados y prosa, sin frontmatter, sin vallas de codigo, "
+    "sin comentarios sobre tu proceso y con titulo limpio, sin etiquetas meta, "
+    "arrancando por el titulo en linea con numeral y espacio."
 )
 
 # Idea canónica de prueba para `--test`: una escena corta, siempre igual. Vive en
@@ -141,7 +156,8 @@ def ruta_payload_en_lore(edessia_pc_dir: str, nombre: str) -> str:
 
 
 def comando_opencode_remoto(edessia_pc_dir: str, payload_nombre: str,
-                            modelo: str = "") -> str:
+                            modelo: str = "", sesion: str = "",
+                            instruccion: str = INSTRUCCION_CORTA) -> str:
     """Comando que corre EN la PC (cmd o PowerShell: sin sintaxis propia de shell).
 
     El mensaje va PRIMERO y `-f` al ÚLTIMO, a propósito: `-f` es un flag tipo
@@ -152,14 +168,18 @@ def comando_opencode_remoto(edessia_pc_dir: str, payload_nombre: str,
 
     `payload_nombre` es el NOMBRE pelado del archivo, que vive en la carpeta del
     lore (`ruta_payload_en_lore`): `-f` lo resuelve contra el `--dir`.
+    `sesion` (hilos /seguir) agrega `--session <id>` para reanudar la sesión de
+    OpenCode; vacío = sesión nueva. `instruccion` permite la variante de
+    seguimiento (`INSTRUCCION_SEGUIMIENTO`).
     """
     ed = f'"{edessia_pc_dir}"' if " " in edessia_pc_dir else edessia_pc_dir
     pl = f'"{payload_nombre}"'  # siempre entrecomillado (vale en cmd y PowerShell)
-    modelo_flag = f" -m {modelo}" if modelo.strip() else ""
-    return (
-        f'opencode run "{INSTRUCCION_CORTA}" --format json{modelo_flag} '
-        f'--dir {ed} -f {pl}'
-    )
+    flags = " --format json"
+    if modelo.strip():
+        flags += f" -m {modelo}"
+    if sesion.strip():
+        flags += f" --session {sesion.strip()}"
+    return f'opencode run "{instruccion}"{flags} --dir {ed} -f {pl}'
 
 
 def extraer_texto_salida(stdout: str) -> str:
@@ -203,6 +223,15 @@ def eventos_json(stdout: str) -> list[dict]:
         if isinstance(obj, dict):
             eventos.append(obj)
     return eventos
+
+
+def extraer_sesion(stdout: str) -> str:
+    """sessionID del primer evento que lo traiga ("" si no hay). Hilos /seguir."""
+    for evento in eventos_json(stdout):
+        ses = evento.get("sessionID", "")
+        if isinstance(ses, str) and ses.strip():
+            return ses.strip()
+    return ""
 
 
 def _recortar(texto: str, largo: int = 500) -> str:
@@ -372,9 +401,10 @@ def entorno_real(infra: InfraSettings, token: str, chat_id: int) -> Entorno:
             detalle = (proc.stderr or b"").decode(errors="replace").strip()
             raise ErrorEnvio(f"scp falló: {detalle or proc.returncode}")
 
-    def correr_opencode(nombre_payload: str) -> str:
+    def correr_opencode(nombre_payload: str, sesion: str = "",
+                        instruccion: str = INSTRUCCION_CORTA) -> str:
         remoto = comando_opencode_remoto(infra.edessia_pc_dir, nombre_payload,
-                                         infra.opencode_model)
+                                         infra.opencode_model, sesion, instruccion)
         try:
             # stdin=DEVNULL es OBLIGATORIO: por `ssh` el stdin remoto es una pipe
             # que nunca cierra, y `opencode run` hace `await Bun.stdin.text()` con
@@ -432,6 +462,8 @@ def procesar_trabajo(conn: sqlite3.Connection, infra: InfraSettings,
     `titulo_forzado` fija el título del archivo (principalmente para `--test`).
     Mide cada paso (ciclo, scp, opencode, guardado) y lo reporta en el aviso ✅
     y en el mensaje (Telegram + stdout del CLI).
+    Hilos /seguir: si el trabajo trae `hilo_id`, reanuda la sesión OpenCode del
+    hilo (`--session`), guarda versionado (`-vN`) y avanza el hilo al terminar.
     """
     t_inicio = time.monotonic()
     ent = entorno or entorno_real(infra, token, chat_id)
@@ -448,6 +480,14 @@ def procesar_trabajo(conn: sqlite3.Connection, infra: InfraSettings,
         return Resultado(trabajo.id, False,
                          f"⚠️ {e} (en {formatear_duracion(time.monotonic() - t_inicio)})")
     tiempos.append(("ciclo PC (ping→WoL→wait)", time.monotonic() - t_inicio))
+
+    # Hilo /seguir (si el trabajo es una vuelta): sesión a reanudar, sufijo de
+    # versión e instrucción de seguimiento. Sin hilo: sesión nueva, sin sufijo.
+    hilo = obtener_hilo(conn, trabajo.hilo_id) if trabajo.hilo_id else None
+    sesion_actual = hilo.session_id if hilo else ""
+    sufijo_version = f"-v{hilo.turno + 1}" if hilo else ""
+    instruccion = INSTRUCCION_SEGUIMIENTO if hilo else INSTRUCCION_CORTA
+    nota_hilo = f" hilo #{hilo.id} vuelta {hilo.turno + 1}" if hilo else ""
 
     archivos: list[str] = []
     try:
@@ -471,7 +511,20 @@ def procesar_trabajo(conn: sqlite3.Connection, infra: InfraSettings,
                             time.monotonic() - t_scp))
             try:
                 t_run = time.monotonic()
-                salida = ent.correr_opencode(nombre)  # type: ignore[operator]
+                try:
+                    salida = ent.correr_opencode(nombre, sesion_actual,  # type: ignore[operator]
+                                                 instruccion)
+                except ErrorEnvio as e_run:
+                    # La sesión pudo podarse en la PC: UN reintento como sesión
+                    # fresca antes de dar el trabajo por fallido. Solo si el error
+                    # habla de sesión; si no, se propaga tal cual.
+                    if sesion_actual and "session" in str(e_run).lower():
+                        log.warning("Reanudación falló (%s): reintento fresco.", e_run)
+                        sesion_actual = ""
+                        salida = ent.correr_opencode(nombre, "",  # type: ignore[operator]
+                                                     instruccion)
+                    else:
+                        raise
                 tiempos.append((f"job {n}: opencode run", time.monotonic() - t_run))
             finally:
                 try:
@@ -481,13 +534,17 @@ def procesar_trabajo(conn: sqlite3.Connection, infra: InfraSettings,
             texto = extraer_texto_salida(salida)
             if not texto:
                 raise ErrorEnvio(f"job {n}: `opencode run` no devolvió texto.")
+            # La sesión del hilo es la última capturada (cada job puede renovarla).
+            cap = extraer_sesion(salida)
+            if cap:
+                sesion_actual = cap
             preambulo, texto = recortar_preambulo(texto)
             if not texto:
                 raise ErrorEnvio(f"job {n}: sin título detectable en la salida.")
             doc = envolver_referencia(texto, ideas, trabajo.extra,  # type: ignore[arg-type]
-                                      nota=f"trabajo #{trabajo.id} job {n}")
-            titulo = titulo_forzado or (extracto(ideas[0].contenido, 50) if ideas  # type: ignore[union-attr]
-                                       else f"trabajo-{trabajo.id}")
+                                      nota=f"trabajo #{trabajo.id} job {n}{nota_hilo}")
+            titulo = (titulo_forzado or (extracto(ideas[0].contenido, 50) if ideas  # type: ignore[union-attr]
+                                         else f"trabajo-{trabajo.id}")) + sufijo_version
             t_save = time.monotonic()
             ruta = guardar_lore(Path(infra.outputs_dir), titulo, doc,
                                 categoria=None, prefijo=prefijo)
@@ -497,7 +554,8 @@ def procesar_trabajo(conn: sqlite3.Connection, infra: InfraSettings,
             # Sidecar con la traza del proceso (qué leyó/hizo OpenCode). Solo si
             # hay traza real: con stdout plano no se genera archivo.
             pensamiento = extraer_pensamiento(
-                salida, nota=f"trabajo #{trabajo.id} job {n}", preambulo=preambulo)
+                salida, nota=f"trabajo #{trabajo.id} job {n}{nota_hilo}",
+                preambulo=preambulo)
             if pensamiento.strip():
                 ruta_th = guardar_lore(Path(infra.outputs_dir), titulo + "-thoughts",
                                        pensamiento, categoria=None, prefijo=prefijo)
@@ -515,6 +573,8 @@ def procesar_trabajo(conn: sqlite3.Connection, infra: InfraSettings,
     for i in _todos_ids(trabajo):
         cambiar_estado(conn, i, "procesada")
     marcar_trabajo(conn, trabajo.id, "hecho")
+    if hilo is not None:
+        avanzar_hilo(conn, hilo.id, sesion_actual)
     detalle = "\n".join(f"• `{a}`" for a in archivos)
     tiempos_txt = bloque_tiempos(tiempos, time.monotonic() - t_inicio)
     ent.notificar(f"✅ Trabajo #{trabajo.id} completado:\n{detalle}\n{tiempos_txt}")  # type: ignore[operator]

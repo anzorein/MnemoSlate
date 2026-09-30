@@ -18,11 +18,13 @@ MnemoSlate/
     config.py             # lee env/.env (Settings bot + InfraSettings red/sender)
     db.py                 # SQLite: ideas + trabajos (claim/intentos) + etiquetas
     develop.py            # parser /desarrollar: + combina, ,/espacio lotea, & extra
+                          # + parse_seguir (hilos /seguir Fase 4)
     tags.py               # #palabra=tag/#123=ID, fuzzy anti-typo, hook auto-tag futuro
     lore.py               # prompts + plantillas scribe/markdown (single-writer: la Pi)
     sender.py             # Fase 4: cola → ciclo PC → opencode → outputs/ → notify → off
                           # + CLI: --test (autocontenido, sin apagar) / --procesar
-    bot.py                # /anotar /ideas[#tag] /tags /tag /desarrollar /procesar
+    bot.py                # /anotar /ideas[#tag] /tags /tag /desarrollar /seguir
+                          # /procesar /comandos + voz
                           # /comandos (índice, fuente única COMANDOS) + voz
     infra/                # Fase 1: red y energía (solo stdlib, corre en la Pi)
       wol.py              # Magic Packet: normalizar MAC, armar y enviar (RF-2.2)
@@ -164,7 +166,7 @@ git clone <usuario_pi>@<ip_pi>:/home/<usuario_pi>/srv/git/lore.git
 Contrato Pi↔PC (`sender.py`, sin puertos públicos, RNF-3):
 
 1. `/desarrollar` encola; `/procesar` reclama el trabajo más viejo (o un `enviado`
-   expirado: anti-zombi por `CLAIM_TIMEOUT_MIN`).
+   expirado: anti-zombi por `CLAIM_TIMEOUT_MIN`). Un trabajo = un ciclo PC.
 2. Ciclo `infra` (ping→WoL→wait). Si la PC no arranca: todo queda pendiente y
    Telegram avisa (RNF-4). La PC nunca se toca si ya está arriba (RNF-1).
 3. El prompt largo viaja en **archivo**: `scp mnemo_payload_<trabajo>_<job>.json`
@@ -185,6 +187,24 @@ Contrato Pi↔PC (`sender.py`, sin puertos públicos, RNF-3):
    (`APAGAR_AL_FINALIZAR=1`): una PC que ya estaba arriba se deja encendida
    (RNF-1 también al apagar). Telegram dice `💤` o `🖥️`.
    Fallos: reencola (o `error` tras `MAX_INTENTOS`) + alerta siempre.
+
+### Hilos: `/seguir` (ida y vuelta en el mismo encendido)
+
+```bash
+/seguir #42 que la taberna esté en el puerto bajo
+```
+
+- Solo **encola** (igual que `/desarrollar`): un `/procesar` la quema. Mandás N
+  `/seguir` y los quemás todos en un ciclo de PC.
+- Cada vuelta **reanuda la sesión OpenCode del hilo** (`--session`): el modelo
+  tiene el contexto de las vueltas anteriores sin reenviar historial.
+- Cada vuelta devuelve la pieza **completa** y se guarda versionada (`-v2.md`,
+  `-v3.md` + sus `-thoughts`); el desarrollo inicial queda sin sufijo (v1).
+- El hilo guarda `session_id` + `turno` en la DB (`hilos`, un hilo por idea). Si la
+  sesión se podó en la PC, hay UN reintento como sesión fresca y el hilo se
+  auto-cura (sin esto, un hilo muerto traba la cola).
+- Una sola vuelta en cola por hilo: feedback → `/procesar` → feedback… (así el
+  orden de la sesión y la numeración `-vN` nunca se rompen).
 
 ### `--test`: e2e autocontenido
 
@@ -289,6 +309,7 @@ Bot (desde el celu; `/comandos` los lista, `/help` detalla):
 | `/tags` (`/etiquetas`) | etiquetas existentes con conteo |
 | `/tag` | `/tag #ID` ver · `/tag #ID #t1 #t2` asignar |
 | `/desarrollar` (`/lore`) | `/desarrollar #ID [...] [& extra]` — encola plan |
+| `/seguir` | `/seguir #ID <feedback>` — nueva vuelta sobre el hilo (sale `-vN.md`) |
 | `/procesar` | corre la cola (enciende la PC, apaga solo si la encendió) |
 | `/comandos` (`/cmd`) | esta lista · `/start` ayuda completa |
 

@@ -339,3 +339,31 @@
   `test_prompt_sin_etiqueta_interim` (prohíbe "interim reference", nombra
   "interim" en la prohibición). **Suite: 116/116 OK.** Sin pushear aún.
 
+## 2026-09-30 — Sesión 23 (hilos `/seguir`: ida y vuelta con sesión reanudada)
+- **Pedido del usuario**: sesión larga empezando de una idea, yendo y viniendo con
+  lo sugerido. Decisiones: mismo encendido (N `/seguir` → un `/procesar`), comando
+  `/seguir` separado, versiones `-vN` (cada vuelta = pieza completa).
+- `db.py`: tabla `hilos` (`idea_id` UNIQUE, `session_id`, `turno`) + migración
+  (`_migrar_hilos` crea tabla y agrega `trabajos.hilo_id`) + CRUD
+  (`crear/obtener/obtener_por_idea/avanzar`) + `hilo_id` en `Trabajo`/`encolar`/
+  `listar`/`reclamar` (default 0 = suelto, compatible).
+- `bot.py`: `/seguir #ID <feedback>` (parse puro `parse_seguir()` en `develop.py`
+  para testear sin telegram). Solo encola; crea el hilo (turno 0 si la idea está
+  pendiente → `-v1`, turno 1 si procesada → `-v2`); **bloquea segunda vuelta en
+  cola** (feedback → `/procesar` → feedback…) para no romper orden ni `-vN`.
+  Entrada en `COMANDOS` + handler (el test bidireccional lo exige).
+- `sender.py`: `comando_opencode_remoto()` con `sesion` (`--session <id>`) e
+  `instruccion` (`INSTRUCCION_SEGUIMIENTO`: encargo en campo `extra`, reglas en
+  `prompt`, mismas restricciones argv); `extraer_sesion()` captura el sessionID;
+  `procesar_trabajo()` reanuda, versiona (`-v{turno+1}`), avanza el hilo y anota
+  `hilo #H vuelta N` en la trazabilidad; fallback: UN reintento fresco solo si el
+  error habla de sesión (si no, se propaga).
+- Tests: `TestHilos` (db: CRUD, UNIQUE, avanzar, hilo_id, migración en DB vieja),
+  `TestSeguir` parser (develop, sin telegram) + flujo async (bot, con telegram:
+  vueltas 1/2, bloqueo, sintaxis, IDs), `TestHilosSender` (resume, versión,
+  fallback, no-fallback, flag, instrucción sana, `extraer_sesion`). En el camino se
+  encontró y repuso un import borrado (`recortar_preambulo`) y se limpió un test.
+- **Suite: 135/135 OK.**
+- **Pendiente**: verificar `--session` en `opencode run` v1.18.33 (evidencia de docs:
+  `--session/-s` = Session ID to continue) y e2e real de dos vueltas desde la Pi.
+

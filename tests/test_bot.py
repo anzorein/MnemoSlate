@@ -12,8 +12,15 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 try:
     from telegram.ext import CommandHandler  # noqa: E402
 
-    from mnemoslate.bot import COMANDOS, build_app, texto_comandos  # noqa: E402
+    from mnemoslate.bot import COMANDOS, build_app, cmd_seguir, texto_comandos  # noqa: E402
     from mnemoslate.config import Settings  # noqa: E402
+    from mnemoslate.db import (  # noqa: E402
+        cambiar_estado,
+        crear_idea,
+        init_db,
+        listar_trabajos,
+        obtener_hilo_por_idea,
+    )
 
     HAS_TG = True
 except ImportError:
@@ -53,6 +60,92 @@ class TestComandos(unittest.TestCase):
         for c, _, _ in COMANDOS:
             self.assertIn(f"/{c}", txt)
         self.assertNotIn("Fase 4 pendiente", txt)
+
+
+class _FakeUser:
+    id = 1
+
+
+class _FakeBot:
+    _mnemo_allowed = 1
+
+
+class _FakeMessage:
+    def __init__(self):
+        self.respuestas = []
+
+    async def reply_text(self, texto, **kw):
+        self.respuestas.append(texto)
+
+
+class _FakeUpdate:
+    effective_user = _FakeUser()
+
+    def __init__(self):
+        self.effective_message = _FakeMessage()
+
+    def get_bot(self):
+        return _FakeBot()
+
+
+class _FakeContext:
+    def __init__(self, conn, args):
+        self.args = args
+        self.application = type("App", (), {"bot_data": {"conn": conn}})()
+
+
+@unittest.skipUnless(HAS_TG, "requiere python-telegram-bot (venv)")
+class TestSeguir(unittest.IsolatedAsyncioTestCase):
+    def setUp(self):
+        import tempfile
+        from pathlib import Path
+
+        self.tmp = tempfile.TemporaryDirectory()
+        self.conn = init_db(Path(self.tmp.name) / "t.db")
+
+    def tearDown(self):
+        self.conn.close()
+        self.tmp.cleanup()
+
+    async def _seguir(self, args):
+        update = _FakeUpdate()
+        ctx = _FakeContext(self.conn, args)
+        await cmd_seguir(update, ctx)
+        return update.effective_message.respuestas
+
+    async def test_primera_vuelta_pendiente(self):
+        a = crear_idea(self.conn, 1, "idea nueva")
+        resp = await self._seguir(["#%d" % a, "cambia", "el", "final"])
+        self.assertTrue(any("vuelta 1" in r for r in resp), resp)
+        h = obtener_hilo_por_idea(self.conn, a)
+        self.assertIsNotNone(h)
+        assert h is not None
+        self.assertEqual(h.turno, 0)  # sin desarrollo previo → primera -v1
+        trabajos = listar_trabajos(self.conn, "encolado")
+        self.assertEqual(len(trabajos), 1)
+        self.assertEqual((trabajos[0].hilo_id, trabajos[0].extra),
+                         (h.id, "cambia el final"))
+
+    async def test_primera_vuelta_procesada(self):
+        a = crear_idea(self.conn, 1, "idea vieja")
+        cambiar_estado(self.conn, a, "procesada")
+        resp = await self._seguir(["#%d" % a, "otro", "enfoque"])
+        self.assertTrue(any("vuelta 2" in r for r in resp), resp)
+
+    async def test_segunda_vuelta_en_cola_bloqueada(self):
+        a = crear_idea(self.conn, 1, "idea")
+        await self._seguir(["#%d" % a, "primero"])
+        resp = await self._seguir(["#%d" % a, "segundo"])
+        self.assertTrue(any("ya tiene una vuelta en cola" in r for r in resp), resp)
+        self.assertEqual(len(listar_trabajos(self.conn, "encolado")), 1)
+
+    async def test_sintaxis_y_ids(self):
+        resp = await self._seguir([])
+        self.assertTrue(any("Uso:" in r for r in resp), resp)
+        resp = await self._seguir(["#999", "algo"])
+        self.assertTrue(any("inexistente" in r for r in resp), resp)
+        resp = await self._seguir(["#1"])
+        self.assertTrue(any("Uso:" in r for r in resp), resp)
 
 
 if __name__ == "__main__":

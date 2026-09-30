@@ -113,6 +113,7 @@ def init_db(db_path: Path) -> sqlite3.Connection:
     with _lock, conn:
         conn.executescript(SCHEMA)
         _migrar_trabajos(conn)
+        _migrar_hilos(conn)
     return conn
 
 
@@ -123,6 +124,33 @@ def _migrar_trabajos(conn: sqlite3.Connection) -> None:
         conn.execute("ALTER TABLE trabajos ADD COLUMN claimed_at TEXT")
     if "intentos" not in cols:
         conn.execute("ALTER TABLE trabajos ADD COLUMN intentos INTEGER NOT NULL DEFAULT 0")
+
+
+HILOS_SCHEMA = """
+CREATE TABLE IF NOT EXISTS hilos(
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    idea_id INTEGER NOT NULL REFERENCES ideas(id),
+    session_id TEXT NOT NULL DEFAULT '',
+    turno INTEGER NOT NULL DEFAULT 1,
+    created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+    updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+    UNIQUE(idea_id)
+);
+CREATE INDEX IF NOT EXISTS idx_hilos_idea ON hilos(idea_id);
+CREATE TRIGGER IF NOT EXISTS trg_hilos_updated
+AFTER UPDATE ON hilos FOR EACH ROW
+BEGIN
+    UPDATE hilos SET updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id=OLD.id;
+END;
+"""
+
+
+def _migrar_hilos(conn: sqlite3.Connection) -> None:
+    """Crea `hilos` y agrega `trabajos.hilo_id` (sesión 23: /seguir)."""
+    conn.executescript(HILOS_SCHEMA)
+    cols = {r["name"] for r in conn.execute("PRAGMA table_info(trabajos)").fetchall()}
+    if "hilo_id" not in cols:
+        conn.execute("ALTER TABLE trabajos ADD COLUMN hilo_id INTEGER")
 
 
 def crear_idea(conn: sqlite3.Connection, user_id: int, contenido: str,
@@ -201,24 +229,81 @@ class Trabajo:
     created_at: str
     intentos: int = 0
     claimed_at: str = ""
+    hilo_id: int = 0  # 0 = trabajo suelto (sin /seguir); >0 = vuelta de un hilo
+
+
+@dataclass
+class Hilo:
+    """Hilo de seguimiento (/seguir): una idea, N vueltas, una sesión OpenCode."""
+    id: int
+    idea_id: int
+    session_id: str  # "" = aún sin primera sesión capturada
+    turno: int  # vueltas completadas (1 = desarrollo inicial)
+    created_at: str
+
+
+def crear_hilo(conn: sqlite3.Connection, idea_id: int, turno_inicial: int = 1) -> int:
+    """Crea el hilo de una idea (UNIQUE por idea: un hilo por idea)."""
+    with _lock, conn:
+        cur = conn.execute(
+            "INSERT INTO hilos(idea_id, turno) VALUES (?,?)",
+            (idea_id, turno_inicial),
+        )
+        return int(cur.lastrowid)
+
+
+def obtener_hilo(conn: sqlite3.Connection, hilo_id: int) -> Hilo | None:
+    with _lock:
+        r = conn.execute(
+            "SELECT id, idea_id, session_id, turno, created_at FROM hilos WHERE id=?",
+            (hilo_id,),
+        ).fetchone()
+    return Hilo(r["id"], r["idea_id"], r["session_id"] or "", r["turno"],
+                r["created_at"]) if r else None
+
+
+def obtener_hilo_por_idea(conn: sqlite3.Connection, idea_id: int) -> Hilo | None:
+    with _lock:
+        r = conn.execute(
+            "SELECT id, idea_id, session_id, turno, created_at FROM hilos"
+            " WHERE idea_id=? ORDER BY id DESC LIMIT 1",
+            (idea_id,),
+        ).fetchone()
+    return Hilo(r["id"], r["idea_id"], r["session_id"] or "", r["turno"],
+                r["created_at"]) if r else None
+
+
+def avanzar_hilo(conn: sqlite3.Connection, hilo_id: int, session_id: str = "") -> bool:
+    """Registra una vuelta completada: turno+1 y session (si vino una nueva)."""
+    with _lock, conn:
+        if session_id:
+            cur = conn.execute(
+                "UPDATE hilos SET turno=turno+1, session_id=? WHERE id=?",
+                (session_id, hilo_id),
+            )
+        else:
+            cur = conn.execute(
+                "UPDATE hilos SET turno=turno+1 WHERE id=?", (hilo_id,))
+        return cur.rowcount > 0
 
 
 def encolar_trabajo(conn: sqlite3.Connection, user_id: int,
-                    jobs: list[list[int]], extra: str = "") -> int:
+                    jobs: list[list[int]], extra: str = "",
+                    hilo_id: int = 0) -> int:
     """Encola un plan parseado para que Fase 4 lo consuma en un ciclo de PC."""
     if not jobs or not all(j for j in jobs):
         raise ValueError("jobs vacío")
     with _lock, conn:
         cur = conn.execute(
-            "INSERT INTO trabajos(jobs_json, extra, user_id) VALUES (?,?,?)",
-            (json.dumps(jobs), extra.strip(), user_id),
+            "INSERT INTO trabajos(jobs_json, extra, user_id, hilo_id) VALUES (?,?,?,?)",
+            (json.dumps(jobs), extra.strip(), user_id, hilo_id or None),
         )
         return int(cur.lastrowid)
 
 
 def listar_trabajos(conn: sqlite3.Connection, estado: str | None = None,
                     limit: int = 20) -> list[Trabajo]:
-    q = "SELECT id, jobs_json, extra, estado, created_at, intentos, claimed_at FROM trabajos"
+    q = "SELECT id, jobs_json, extra, estado, created_at, intentos, claimed_at, hilo_id FROM trabajos"
     params: list = []
     if estado:
         if estado not in ESTADOS_TRABAJO:
@@ -231,7 +316,8 @@ def listar_trabajos(conn: sqlite3.Connection, estado: str | None = None,
         rows = conn.execute(q, params).fetchall()
     return [Trabajo(r["id"], json.loads(r["jobs_json"]), r["extra"],
                     r["estado"], r["created_at"],
-                    r["intentos"] or 0, r["claimed_at"] or "") for r in rows]
+                    r["intentos"] or 0, r["claimed_at"] or "",
+                    r["hilo_id"] or 0) for r in rows]
 
 
 def reclamar_trabajo(conn: sqlite3.Connection, timeout_min: int = 30) -> Trabajo | None:
@@ -245,7 +331,7 @@ def reclamar_trabajo(conn: sqlite3.Connection, timeout_min: int = 30) -> Trabajo
     corte_txt = corte.strftime("%Y-%m-%dT%H:%M:%f")[:-3] + "Z"
     with _lock, conn:
         r = conn.execute(
-            "SELECT id, jobs_json, extra, estado, created_at, intentos, claimed_at"
+            "SELECT id, jobs_json, extra, estado, created_at, intentos, claimed_at, hilo_id"
             " FROM trabajos WHERE estado='encolado'"
             " OR (estado='enviado' AND (claimed_at IS NULL OR claimed_at < ?))"
             " ORDER BY id ASC LIMIT 1",
@@ -260,7 +346,8 @@ def reclamar_trabajo(conn: sqlite3.Connection, timeout_min: int = 30) -> Trabajo
             (r["id"],),
         )
         return Trabajo(r["id"], json.loads(r["jobs_json"]), r["extra"], "enviado",
-                       r["created_at"], (r["intentos"] or 0) + 1, "")
+                       r["created_at"], (r["intentos"] or 0) + 1, "",
+                       r["hilo_id"] or 0)
 
 
 def reencolar_expirados(conn: sqlite3.Connection, timeout_min: int = 30) -> int:

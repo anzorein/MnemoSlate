@@ -35,6 +35,7 @@ from telegram.ext import (
 
 from .config import InfraSettings, Settings, load_infra_settings, load_settings
 from .db import (
+    crear_hilo,
     crear_idea,
     encolar_trabajo,
     etiquetas_de_idea,
@@ -44,9 +45,11 @@ from .db import (
     init_db,
     listar_etiquetas,
     listar_ideas,
+    listar_trabajos,
+    obtener_hilo_por_idea,
     obtener_idea,
 )
-from .develop import USO, ParseError, formatear_plan, parse_desarrollar
+from .develop import USO, ParseError, formatear_plan, parse_desarrollar, parse_seguir
 from .sender import procesar_trabajo
 from .tags import extraer_tags, normalizar_tag, sugerir_parecidos
 
@@ -60,6 +63,7 @@ COMANDOS: list[tuple[str, str, str]] = [
     ("tags", "/tags", "etiquetas con conteo (alias: /etiquetas)"),
     ("tag", "/tag #ID [#t1 #t2]", "ver o asignar tags"),
     ("desarrollar", "/desarrollar #ID [...] [& extra]", "plan de lore (alias: /lore)"),
+    ("seguir", "/seguir #ID <feedback>", "nueva vuelta sobre un hilo"),
     ("procesar", "/procesar", "corre la cola (alias: /procesar_cola)"),
     ("comandos", "/comandos", "esta lista (alias: /cmd)"),
     ("start", "/start", "ayuda completa (alias: /help, /ayuda)"),
@@ -317,6 +321,69 @@ async def cmd_desarrollar(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     )
 
 
+USO_SEGUIR = (
+    "Uso: `/seguir #ID <qué cambiar/agregar>`\n"
+    "Ej: `/seguir #42 que la taberna esté en el puerto bajo`"
+)
+
+
+async def cmd_seguir(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """/seguir — hilos Fase 4: encola una vuelta sobre la sesión de una idea.
+
+    Solo encola (igual que /desarrollar): /procesar la corre reanudando la
+    sesión OpenCode del hilo. Cada vuelta devuelve la pieza COMPLETA y se
+    guarda versionada (-v2, -v3…).
+    """
+    if not await _solo_autorizado(update):
+        return
+    raw = " ".join(context.args or []).strip()
+    try:
+        idea_id, feedback = parse_seguir(raw)
+    except ValueError:
+        await update.effective_message.reply_text(  # type: ignore[union-attr]
+            f"Falta #ID o feedback.\n\n{USO_SEGUIR}", parse_mode="Markdown"
+        )
+        return
+    conn = _conn(context)
+    idea = obtener_idea(conn, idea_id)
+    if idea is None:
+        await update.effective_message.reply_text(  # type: ignore[union-attr]
+            f"⚠️ ID inexistente: #{idea_id}\nRevisá con `/ideas`.",
+        )
+        return
+    hilo = obtener_hilo_por_idea(conn, idea_id)
+    if hilo is None:
+        # Sin desarrollo previo el hilo arranca en turno 0 → primera vuelta -v1;
+        # si la idea ya está procesada, la v1 es el doc existente → -v2.
+        hilo_id = crear_hilo(conn, idea_id,
+                             turno_inicial=1 if idea.estado == "procesada" else 0)
+        turno_base = 1 if idea.estado == "procesada" else 0
+    else:
+        hilo_id, turno_base = hilo.id, hilo.turno
+    # Una sola vuelta en cola por hilo: así el orden de la sesión y la
+    # numeración -vN nunca se rompen (feedback → /procesar → feedback…).
+    pendientes = [t for estado in ("encolado", "enviado")
+                  for t in listar_trabajos(conn, estado) if t.hilo_id == hilo_id]
+    if pendientes:
+        await update.effective_message.reply_text(  # type: ignore[union-attr]
+            f"🧵 El hilo #{hilo_id} ya tiene una vuelta en cola "
+            f"(trabajo #{pendientes[0].id}). Corre `/procesar` antes de seguir.",
+        )
+        return
+    turno_sig = turno_base + 1
+    tid = encolar_trabajo(
+        conn,
+        user_id=update.effective_user.id,  # type: ignore[union-attr]
+        jobs=[[idea_id]],
+        extra=feedback,
+        hilo_id=hilo_id,
+    )
+    await update.effective_message.reply_text(  # type: ignore[union-attr]
+        f"🧵 Hilo #{hilo_id} · vuelta {turno_sig} encolada como trabajo #{tid} "
+        f"(saldrá `-v{turno_sig}.md`). Corre `/procesar` para quemarla.",
+    )
+
+
 async def cmd_procesar(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """/procesar — Fase 4: un ciclo PC para el trabajo encolado más viejo.
 
@@ -392,6 +459,7 @@ def build_app(settings: Settings, infra: InfraSettings | None = None) -> "Applic
     app.add_handler(CommandHandler(["tags", "etiquetas"], cmd_tags))
     app.add_handler(CommandHandler("tag", cmd_tag))
     app.add_handler(CommandHandler(["desarrollar", "lore"], cmd_desarrollar))
+    app.add_handler(CommandHandler("seguir", cmd_seguir))
     app.add_handler(CommandHandler(["procesar", "procesar_cola"], cmd_procesar))
     app.add_handler(MessageHandler(filters.VOICE, on_voz))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, on_texto_libre))

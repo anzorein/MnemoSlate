@@ -12,10 +12,13 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from mnemoslate.config import InfraSettings  # noqa: E402
 from mnemoslate.db import (  # noqa: E402
+    avanzar_hilo,
+    crear_hilo,
     crear_idea,
     encolar_trabajo,
     init_db,
     listar_trabajos,
+    obtener_hilo,
     obtener_idea,
     reclamar_trabajo,
 )
@@ -29,6 +32,7 @@ from mnemoslate.lore import (  # noqa: E402
 from mnemoslate.sender import (  # noqa: E402
     IDEA_PRUEBA,
     INSTRUCCION_CORTA,
+    INSTRUCCION_SEGUIMIENTO,
     SALIDA_ERROR,
     SALIDA_OK,
     TITULO_PRUEBA,
@@ -39,9 +43,10 @@ from mnemoslate.sender import (  # noqa: E402
     comando_opencode_remoto,
     comando_scp,
     ejecutar_cli,
+    extraer_pensamiento,
+    extraer_sesion,
     extraer_texto_salida,
     entorno_real,
-    extraer_pensamiento,
     formatear_duracion,
     procesar_trabajo,
     recortar_preambulo,
@@ -84,6 +89,7 @@ class Fakes:
         self.borrados = []
         self.apagados = 0
         self.avisos = []
+        self.sesiones = []  # (nombre, sesion, instruccion) por llamada
         self._salida = salida
         self._ciclo_ok = ciclo_ok
         self._opencode_ok = opencode_ok
@@ -97,7 +103,8 @@ class Fakes:
     def enviar_payload(self, contenido, remoto):
         self.salidas.append((contenido, remoto))
 
-    def correr_opencode(self, remoto):
+    def correr_opencode(self, remoto, sesion="", instruccion=""):
+        self.sesiones.append((remoto, sesion, instruccion))
         if not self._opencode_ok:
             raise ErrorEnvio("ssh roto")
         return self._salida
@@ -236,6 +243,124 @@ class TestSender(unittest.TestCase):
         self.assertTrue(res.ok)
         self.assertEqual(f.apagados, 0)
         self.assertIn("modo test", res.mensaje)
+
+
+class TestHilosSender(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self.tmp.name)
+        self.conn = init_db(self.root / "t.db")
+        self.a = crear_idea(self.conn, 1, "idea con hilo")
+        self.infra = _infra(self.root)
+
+    def tearDown(self):
+        self.conn.close()
+        self.tmp.cleanup()
+
+    def _trabajo_hilo(self, **kw):
+        hid = crear_hilo(self.conn, self.a, **kw)
+        tid = encolar_trabajo(self.conn, 1, [[self.a]], extra="feedback",
+                              hilo_id=hid)
+        return hid, tid
+
+    def test_vuelta_reanuda_sesion_y_versiona(self):
+        hid, _ = self._trabajo_hilo()  # hilo en turno 1 → la vuelta sale -v2
+        f = Fakes(salida=JSON_TRAZA)
+        res = procesar_trabajo(self.conn, self.infra, "tok", 1, f.entorno())
+        self.assertTrue(res.ok)
+        # reanudó la sesión previa con la instrucción de seguimiento
+        self.assertEqual(len(f.sesiones), 1)
+        _, sesion, instruccion = f.sesiones[0]
+        self.assertEqual(sesion, "")
+        # hilo sin sesión previa: primera vuelta arranca sesión nueva
+        self.assertIn("campo extra", instruccion)
+        # archivo versionado -v2 (+ sidecar) y el hilo avanzó con la capturada
+        nombres = sorted(Path(a).name for a in res.archivos)
+        self.assertEqual(len(nombres), 2)
+        self.assertTrue(any(n.endswith("-v2.md") for n in nombres), nombres)
+        self.assertTrue(any(n.endswith("-v2-thoughts.md") for n in nombres), nombres)
+        h = obtener_hilo(self.conn, hid)
+        assert h is not None
+        self.assertEqual((h.turno, h.session_id), (2, "ses_1"))
+
+    def test_vuelta_con_sesion_previa_la_reanuda(self):
+        hid, _ = self._trabajo_hilo()
+        avanzar_hilo(self.conn, hid, "ses_previa")
+        f = Fakes(salida=JSON_TRAZA)
+        res = procesar_trabajo(self.conn, self.infra, "tok", 1, f.entorno())
+        self.assertTrue(res.ok)
+        self.assertEqual(f.sesiones[0][1], "ses_previa")
+
+    def test_sin_hilo_no_hay_sesion_ni_version(self):
+        encolar_trabajo(self.conn, 1, [[self.a]])
+        f = Fakes(salida=JSON_TRAZA)
+        res = procesar_trabajo(self.conn, self.infra, "tok", 1, f.entorno())
+        self.assertTrue(res.ok)
+        self.assertEqual(f.sesiones[0][1], "")
+        self.assertIn("campo prompt", f.sesiones[0][2])
+        self.assertFalse(any("-v" in Path(a).name for a in res.archivos),
+                         res.archivos)
+
+    def test_fallback_sesion_fresca(self):
+        hid, _ = self._trabajo_hilo()
+
+        llamadas = []
+
+        def correr(nombre, sesion="", instruccion=""):
+            llamadas.append(sesion)
+            if sesion == "ses_muerta":
+                raise ErrorEnvio("opencode run devolvió 1: unknown session ses_muerta")
+            return JSON_TRAZA
+
+        f = Fakes()
+        ent = f.entorno()
+        ent.correr_opencode = correr  # type: ignore[method-assign]
+        # hilo con sesión podada: primer intento con ella, reintento fresco
+        avanzar_hilo(self.conn, hid, "ses_muerta")
+        res = procesar_trabajo(self.conn, self.infra, "tok", 1, ent)
+        self.assertTrue(res.ok)
+        self.assertEqual(llamadas, ["ses_muerta", ""])
+        # el hilo se curó solo: guarda la sesión nueva capturada
+        h = obtener_hilo(self.conn, hid)
+        assert h is not None
+        self.assertEqual(h.session_id, "ses_1")
+
+    def test_error_no_sesion_no_reintenta_fresco(self):
+        hid, _ = self._trabajo_hilo()
+        avanzar_hilo(self.conn, hid, "ses_muerta")
+        llamadas = []
+
+        def correr(nombre, sesion="", instruccion=""):
+            llamadas.append(sesion)
+            raise ErrorEnvio("ssh roto")
+
+        f = Fakes()
+        ent = f.entorno()
+        ent.correr_opencode = correr  # type: ignore[method-assign]
+        res = procesar_trabajo(self.conn, _infra(self.root, max_intentos=1),
+                               "tok", 1, ent)
+        self.assertFalse(res.ok)
+        self.assertEqual(llamadas, ["ses_muerta"])  # un solo intento, sin fresco
+
+    def test_comando_con_session(self):
+        c = comando_opencode_remoto(r"D:\Documentos\Projects\Edessia", "p.json",
+                                    modelo="a/b", sesion="ses_9")
+        self.assertIn("--session ses_9", c)
+        self.assertLess(c.index("--session"), c.index("-f "))
+        sin = comando_opencode_remoto(r"D:\Documentos\Projects\Edessia", "p.json")
+        self.assertNotIn("--session", sin)
+
+    def test_instruccion_seguimiento_sana(self):
+        self.assertNotIn("scribe", INSTRUCCION_SEGUIMIENTO.lower())
+        self.assertNotIn('"', INSTRUCCION_SEGUIMIENTO)
+        self.assertIn("campo extra", INSTRUCCION_SEGUIMIENTO)
+        for ch in "()&|<>^%!\r\n":
+            self.assertNotIn(ch, INSTRUCCION_SEGUIMIENTO, f"hostil: {ch!r}")
+
+    def test_extraer_sesion(self):
+        self.assertEqual(extraer_sesion(JSON_TRAZA), "ses_1")
+        self.assertEqual(extraer_sesion("texto plano"), "")
+        self.assertEqual(extraer_sesion(""), "")
 
 
 class TestSalida(unittest.TestCase):

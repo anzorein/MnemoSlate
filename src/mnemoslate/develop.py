@@ -30,6 +30,21 @@ MAX_IDS_POR_JOB = 10
 EXTRA_MAX = 2000
 
 
+def parse_seguir(raw: str) -> tuple[int, str]:
+    """`/seguir #42 <feedback>` -> (42, feedback). Hilos Fase 4 (/seguir).
+
+    Sintaxis mínima a propósito (una idea, texto libre): el feedback viaja como
+    `extra` del trabajo y el hilo se resuelve en el bot. Lanza ValueError si
+    falta #ID válido o feedback.
+    """
+    partes = (raw or "").split(None, 1)
+    if not partes or not partes[0].startswith("#") or not partes[0][1:].isdigit():
+        raise ValueError("falta #ID (ej: `/seguir #42 <feedback>`)")
+    if len(partes) < 2 or not partes[1].strip():
+        raise ValueError("falta feedback (ej: `/seguir #42 <feedback>`)")
+    return int(partes[0][1:]), partes[1].strip()
+
+
 class ParseError(ValueError):
     """Error de sintaxis en /desarrollar (se muestra ayuda al usuario)."""
 
