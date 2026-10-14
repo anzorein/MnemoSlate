@@ -1,11 +1,12 @@
 """CLI de diagnóstico de la Fase 1. Corre igual en la PC dev y en la Raspberry.
 
-    python -m mnemoslate.infra --info                 # muestra la config de red
-    python -m mnemoslate.infra --ping                 # RF-2.1: ¿responde la PC?
-    python -m mnemoslate.infra --wake                 # RF-2.2: manda el Magic Packet
-    python -m mnemoslate.infra --wait                 # RF-2.3: espera el arranque
-    python -m mnemoslate.infra --encender             # ping -> si está apagada, WoL + espera
-    python -m mnemoslate.infra --apagar               # RF-2.4: apaga la PC por SSH
+    mnemo-infra --info                 # muestra la config de red
+    mnemo-infra --ping                 # RF-2.1: ¿responde la PC?
+    mnemo-infra --wake                 # RF-2.2: manda el Magic Packet
+    mnemo-infra --wait                 # RF-2.3: espera el arranque
+    mnemo-infra --encender             # ping -> si está apagada, WoL + espera
+    mnemo-infra --apagar               # RF-2.4: apaga la PC por SSH
+    (`python -m mnemoslate.infra ...` sigue funcionando igual.)
 
 Alias: `--on` = `--encender`, `--off`/`--shutdown` = `--apagar`, `--suspender`.
 
@@ -163,7 +164,7 @@ def main(argv: list[str] | None = None) -> int:
             stream.reconfigure(encoding="utf-8", errors="replace")
 
     parser = argparse.ArgumentParser(
-        prog="python -m mnemoslate.infra",
+        prog="mnemo-infra",
         description="Red y energía de la PC (ping / Wake-on-LAN / encendido / apagado).",
     )
     parser.add_argument("--info", action="store_true", help="muestra la config y sale")

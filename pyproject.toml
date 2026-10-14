@@ -12,5 +12,14 @@ dependencies = []
 [project.optional-dependencies]
 bot = ["python-telegram-bot>=21,<23", "python-dotenv>=1.0"]
 
+# Comandos cortos (tras `pip install -e .`, sin PYTHONPATH ni `python -m`):
+#   mnemoslate          -> bot de Telegram
+#   mnemo-infra         -> red y energía de la PC (--encender/--apagar/...)
+#   mnemo-sender        -> Fase 4 (--test/--procesar)
+[project.scripts]
+mnemoslate = "mnemoslate.bot:main"
+mnemo-infra = "mnemoslate.infra.__main__:main"
+mnemo-sender = "mnemoslate.sender:main_cli"
+
 [tool.setuptools.packages.find]
 where = ["src"]

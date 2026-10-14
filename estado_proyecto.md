@@ -367,3 +367,23 @@
 - **Pendiente**: verificar `--session` en `opencode run` v1.18.33 (evidencia de docs:
   `--session/-s` = Session ID to continue) y e2e real de dos vueltas desde la Pi.
 
+## 2026-10-14 — Sesión 24 (comandos cortos + chau PYTHONPATH)
+- **Pedido del usuario**: no más `export PYTHONPATH=src`, y no tener que acordarse
+  la estructura para encender/apagar la PC (uso frecuente).
+- `pyproject.toml`: `[project.scripts]` con `mnemoslate` (bot), `mnemo-infra`
+  (red/energía) y `mnemo-sender` (Fase 4). Tras UN `pip install -e .` por máquina,
+  andan desde cualquier cwd sin `PYTHONPATH` ni `python -m`, en Pi y PC.
+- Energía con dos alias en el `~/.bashrc` de la Pi (no en el repo):
+  `alias pcon='mnemo-infra --encender'` y `alias pcoff='mnemo-infra --apagar'`.
+  Se descartaron scripts committeados (`chmod`+`PATH`, no andan en Windows).
+- `infra/__main__.py`: `prog="mnemo-infra"` + docstring con nombres cortos
+  (`python -m ...` sigue funcionando).
+- Test nuevo `tests/test_empaquetado.py` (tomllib): los 3 scripts existen y apuntan
+  a callables importables (bot con skip si falta telegram).
+- README: comandos cortos en Fase 1/Comandos/Uso, alias pcon/pcoff, fallback
+  `PYTHONPATH=src` solo para python del sistema sin venv.
+- Verificado en esta PC: wrappers generados, `--help` de ambos, `.exe` real
+  corriendo desde otro disco/cwd. **Suite: 137/137 OK.**
+- **Pendiente en la Pi**: `pull` + re-correr `pip install -e .` en el venv (para
+  generar los wrappers) + agregar los dos alias al `~/.bashrc`.
+

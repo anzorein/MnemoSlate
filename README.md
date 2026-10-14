@@ -65,22 +65,22 @@ Requisitos, todos verificables:
 ## Fase 1: probar desde la Raspberry
 
 ```bash
-python -m mnemoslate.infra --info      # muestra MAC/IP/broadcast y los IPs locales
-python -m mnemoslate.infra --ping      # RF-2.1 ¿responde?
-python -m mnemoslate.infra --wake      # RF-2.2 Magic Packet (broadcast de subred y limitado, puertos 9 y 7)
-python -m mnemoslate.infra --encender  # ping -> si está apagada: WoL + espera   (alias --on)
-python -m mnemoslate.infra --apagar    # RF-2.4 apaga por SSH                    (alias --off/--shutdown)
+mnemo-infra --info      # muestra MAC/IP/broadcast y los IPs locales
+mnemo-infra --ping      # RF-2.1 ¿responde?
+mnemo-infra --wake      # RF-2.2 Magic Packet (broadcast de subred y limitado, puertos 9 y 7)
+mnemo-infra --encender  # ping -> si está apagada: WoL + espera   (alias --on)
+mnemo-infra --apagar    # RF-2.4 apaga por SSH                    (alias --off/--shutdown)
 ```
 
 Prueba completa: `shutdown /s /t 0` en la PC (el LED del RJ45 queda encendido) y
-desde la Pi `python -m mnemoslate.infra --encender`. Debe arrancar en 10-60s.
+desde la Pi `mnemo-infra --encender`. Debe arrancar en 10-60s.
 
 Códigos de salida: `0` encendida / orden enviada · `1` no respondió en el plazo
 (la idea queda *pendiente*, RNF-4) · `2` error de config o hardware.
 
 ## Fase 1: apagado remoto por SSH (RF-2.4)
 
-Para que la Pi pueda apagar la PC (`python -m mnemoslate.infra --apagar`, alias
+Para que la Pi pueda apagar la PC (`mnemo-infra --apagar`, alias
 `--shutdown`) hace falta OpenSSH Server en la PC, configurado **solo por clave**:
 
 **En la PC (PowerShell como Administrador):**
@@ -209,7 +209,7 @@ Contrato Pi↔PC (`sender.py`, sin puertos públicos, RNF-3):
 ### `--test`: e2e autocontenido
 
 ```bash
-python -m mnemoslate.sender --test
+mnemo-sender --test
 ```
 
 Corre el pipeline **real** (ping → WoL → scp → `opencode run`) pero:
@@ -313,16 +313,23 @@ Bot (desde el celu; `/comandos` los lista, `/help` detalla):
 | `/procesar` | corre la cola (enciende la PC, apaga solo si la encendió) |
 | `/comandos` (`/cmd`) | esta lista · `/start` ayuda completa |
 
-Pi/PC (sin `PYTHONPATH`: con el editable instalado basta el venv activo):
+Pi/PC (con el editable instalado no hay `PYTHONPATH` ni `python -m`):
 
 ```bash
-python -m mnemoslate.infra --info --ping --wake --wait --encender --apagar
-python -m mnemoslate.sender --test      # e2e autocontenido (DB temporal, sin apagar)
-python -m mnemoslate.sender --procesar  # pipeline real completo
+mnemo-infra --info --ping --wake --wait --encender --apagar
+mnemo-sender --test      # e2e autocontenido (DB temporal, sin apagar)
+mnemo-sender --procesar  # pipeline real completo
 ```
 
 Alias de `infra`: `--on`/`--encender` · `--off`/`--shutdown`/`--apagar` ·
 `--suspender`.
+
+Atajos de energía en la Pi (una vez, en `~/.bashrc`):
+
+```bash
+alias pcon='mnemo-infra --encender'
+alias pcoff='mnemo-infra --apagar'
+```
 
 ## Uso dev (nada global: todo en `.venv`)
 
@@ -330,11 +337,13 @@ Alias de `infra`: `--on`/`--encender` · `--off`/`--shutdown`/`--apagar` ·
 python -m venv .venv
 # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
-pip install -e .   # editable: chau PYTHONPATH para siempre
+pip install -e .   # editable: instala mnemoslate/mnemo-infra/mnemo-sender, chau PYTHONPATH
 cp .env.example .env   # completar BOT_TOKEN y ALLOWED_USER_ID
 python -m unittest discover -s tests -v
-python -m mnemoslate   # desde cualquier cwd del proyecto
+mnemoslate   # el bot, desde cualquier cwd del proyecto
 ```
+
+Sin venv (python del sistema): `export PYTHONPATH=src` sigue sirviendo de fallback.
 
 ## Deploy Pi (systemd, una sola vez)
 
