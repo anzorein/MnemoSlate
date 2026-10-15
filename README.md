@@ -331,6 +331,22 @@ alias pcon='mnemo-infra --encender'
 alias pcoff='mnemo-infra --apagar'
 ```
 
+Si al conectarte por SSH los alias no existen hasta hacer `source ~/.bashrc`
+a mano, es porque tu shell login no carga el `.bashrc` (falta `~/.profile` o
+`~/.bash_profile`). Crealo una vez:
+
+```bash
+cat > ~/.bash_profile <<'EOF'
+# Carga ~/.bashrc en shells login (SSH interactivo).
+if [ -n "$BASH_VERSION" ] && [ -f "$HOME/.bashrc" ]; then
+    . "$HOME/.bashrc"
+fi
+EOF
+```
+
+Verificación (simula un login fresco, sin reconectar): `bash -l -c 'type pcoff'`
+tiene que mostrar el alias.
+
 ## Uso dev (nada global: todo en `.venv`)
 
 ```bash
