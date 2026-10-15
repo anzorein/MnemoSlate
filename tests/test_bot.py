@@ -3,6 +3,7 @@
 Garantía: todo CommandHandler registrado está en COMANDOS y viceversa.
 Si agregás un comando al bot sin documentarlo (o al revés), esto falla.
 """
+import re
 import sys
 import unittest
 from pathlib import Path
@@ -12,7 +13,16 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 try:
     from telegram.ext import CommandHandler  # noqa: E402
 
-    from mnemoslate.bot import COMANDOS, build_app, cmd_desarrollar, cmd_seguir, texto_comandos  # noqa: E402
+    from mnemoslate.bot import (  # noqa: E402
+        AYUDA,
+        COMANDOS,
+        USO_SEGUIR,
+        USO_TAG,
+        build_app,
+        cmd_desarrollar,
+        cmd_seguir,
+        texto_comandos,
+    )
     from mnemoslate.config import Settings  # noqa: E402
     from mnemoslate.db import (  # noqa: E402
         cambiar_estado,
@@ -21,6 +31,7 @@ try:
         listar_trabajos,
         obtener_hilo_por_idea,
     )
+    from mnemoslate.develop import USO  # noqa: E402
 
     HAS_TG = True
 except ImportError:
@@ -60,6 +71,28 @@ class TestComandos(unittest.TestCase):
         for c, _, _ in COMANDOS:
             self.assertIn(f"/{c}", txt)
         self.assertNotIn("Fase 4 pendiente", txt)
+
+
+@unittest.skipUnless(HAS_TG, "requiere python-telegram-bot (venv)")
+class TestMarkdownSeguro(unittest.TestCase):
+    """Toda entidad fuera de `código` viene en pares (Sesión 26).
+
+    Un `_` suelto en texto plano abre una itálica que nunca cierra y Telegram
+    rechaza el mensaje con BadRequest (`/start` caía por `/procesar_cola` sin
+    backticks). Solo cubre strings que se envían CON parse_mode="Markdown".
+    """
+
+    def _balanceado(self, txt):
+        limpio = re.sub(r"`[^`]*`", "", txt)
+        return limpio.count("_") % 2 == 0 and limpio.count("*") % 2 == 0
+
+    def test_ayuda_y_comandos(self):
+        for txt in (texto_comandos(), AYUDA):
+            self.assertTrue(self._balanceado(txt), txt[:80])
+
+    def test_usos(self):
+        for txt in (USO, USO_TAG, USO_SEGUIR):
+            self.assertTrue(self._balanceado(txt), txt[:60])
 
 
 class _FakeUser:

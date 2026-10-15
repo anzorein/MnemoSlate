@@ -64,7 +64,7 @@ COMANDOS: list[tuple[str, str, str]] = [
     ("tag", "/tag #ID [#t1 #t2]", "ver o asignar tags"),
     ("desarrollar", "/desarrollar #ID [...] [& extra]", "plan de lore (alias: /lore)"),
     ("seguir", "/seguir #ID <feedback>", "nueva vuelta sobre un hilo"),
-    ("procesar", "/procesar", "corre la cola (alias: /procesar_cola)"),
+    ("procesar", "/procesar", "corre la cola (alias: `/procesar_cola`)"),
     ("comandos", "/comandos", "esta lista (alias: /cmd)"),
     ("start", "/start", "ayuda completa (alias: /help, /ayuda)"),
 ]

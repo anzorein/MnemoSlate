@@ -405,3 +405,16 @@
 - **Pendiente**: verificar `--session` en `opencode run` v1.18.33 y e2e real de dos
   vueltas desde la Pi (ver pasos en el chat).
 
+## 2026-10-15 — Sesión 26 (`/start` caído por un `_` sin cerrar)
+- **Reporte del usuario (Pi, primer `/start`)**: `BadRequest: Can't parse entities:
+  can't find end of the entity starting at byte offset 448` en `cmd_start`.
+- Causa: en `COMANDOS`, la descripción era `corre la cola (alias: /procesar_cola)`
+  con el alias en texto plano. El `_` abría una itálica que nunca cerraba.
+  Localizado contando bytes exactos sobre el `AYUDA` renderizado (offset 448 =
+  ese `_`). Los demás strings con Markdown (`USO`, `USO_TAG`, `USO_SEGUIR`) se
+  auditaron y están sanos; los replies sin `parse_mode` son inmunes por diseño.
+- Fix: alias entre backticks en la descripción. Test nuevo `TestMarkdownSeguro`:
+  saca los spans de código y exige `_`/`*` en pares en todo string que viaja con
+  `parse_mode="Markdown"` (heurística contra esta clase de bug).
+- **Suite: 142/142 OK.**
+
