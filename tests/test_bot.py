@@ -12,7 +12,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 try:
     from telegram.ext import CommandHandler  # noqa: E402
 
-    from mnemoslate.bot import COMANDOS, build_app, cmd_seguir, texto_comandos  # noqa: E402
+    from mnemoslate.bot import COMANDOS, build_app, cmd_desarrollar, cmd_seguir, texto_comandos  # noqa: E402
     from mnemoslate.config import Settings  # noqa: E402
     from mnemoslate.db import (  # noqa: E402
         cambiar_estado,
@@ -146,6 +146,30 @@ class TestSeguir(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(any("inexistente" in r for r in resp), resp)
         resp = await self._seguir(["#1"])
         self.assertTrue(any("Uso:" in r for r in resp), resp)
+
+    async def test_desarrollar_ata_hilo(self):
+        a = crear_idea(self.conn, 1, "idea para desarrollar")
+        update = _FakeUpdate()
+        await cmd_desarrollar(update, _FakeContext(self.conn, ["#%d" % a]))
+        resp = update.effective_message.respuestas
+        self.assertTrue(any("encolado" in r for r in resp), resp)
+        h = obtener_hilo_por_idea(self.conn, a)
+        self.assertIsNotNone(h)
+        assert h is not None
+        self.assertEqual(h.turno, 0)
+        trabajos = listar_trabajos(self.conn, "encolado")
+        self.assertEqual(len(trabajos), 1)
+        self.assertEqual(trabajos[0].hilo_id, h.id)
+
+    async def test_desarrollar_lote_sin_hilo(self):
+        a = crear_idea(self.conn, 1, "una")
+        b = crear_idea(self.conn, 1, "otra")
+        update = _FakeUpdate()
+        await cmd_desarrollar(update, _FakeContext(self.conn, ["#%d" % a, "#%d" % b]))
+        trabajos = listar_trabajos(self.conn, "encolado")
+        self.assertEqual(len(trabajos), 1)
+        self.assertEqual(trabajos[0].hilo_id, 0)
+        self.assertIsNone(obtener_hilo_por_idea(self.conn, a))
 
 
 if __name__ == "__main__":

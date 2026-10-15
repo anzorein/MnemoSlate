@@ -309,11 +309,20 @@ async def cmd_desarrollar(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         )
         return
     # RNF-4: persiste en cola SQLite; Fase 4 la consumirá vía WoL+SSH. Ideas en pendiente.
+    # Hilos /seguir: si el plan es una sola idea en un solo job, el trabajo se
+    # ata a su hilo (nuevo en turno 0) para que el sender capture la sesión y la
+    # primera /seguir reanude de verdad. Lotes multi-idea van sueltos.
+    hilo_id = 0
+    if len(plan.jobs) == 1 and len(plan.todos_ids) == 1:
+        hilo = obtener_hilo_por_idea(conn, plan.todos_ids[0])
+        hilo_id = hilo.id if hilo else crear_hilo(conn, plan.todos_ids[0],
+                                                  turno_inicial=0)
     tid = encolar_trabajo(
         conn,
         user_id=update.effective_user.id,  # type: ignore[union-attr]
         jobs=plan.jobs,
         extra=plan.extra,
+        hilo_id=hilo_id,
     )
     await update.effective_message.reply_text(  # type: ignore[union-attr]
         f"{formatear_plan(plan)}\n\n📋 Trabajo #{tid} encolado: en Fase 4 esto encenderá la PC. "

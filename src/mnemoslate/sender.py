@@ -482,12 +482,16 @@ def procesar_trabajo(conn: sqlite3.Connection, infra: InfraSettings,
     tiempos.append(("ciclo PC (ping→WoL→wait)", time.monotonic() - t_inicio))
 
     # Hilo /seguir (si el trabajo es una vuelta): sesión a reanudar, sufijo de
-    # versión e instrucción de seguimiento. Sin hilo: sesión nueva, sin sufijo.
+    # versión e instrucción de seguimiento. Solo es "vuelta" si el hilo ya tiene
+    # turnos completados (turno>=1): un /desarrollar con hilo recién creado
+    # (turno 0) es desarrollo inicial —sin sufijo ni instrucción de vuelta—,
+    # aunque ya capture sesión para la primera /seguir de verdad.
     hilo = obtener_hilo(conn, trabajo.hilo_id) if trabajo.hilo_id else None
+    es_vuelta = hilo is not None and hilo.turno >= 1
     sesion_actual = hilo.session_id if hilo else ""
-    sufijo_version = f"-v{hilo.turno + 1}" if hilo else ""
-    instruccion = INSTRUCCION_SEGUIMIENTO if hilo else INSTRUCCION_CORTA
-    nota_hilo = f" hilo #{hilo.id} vuelta {hilo.turno + 1}" if hilo else ""
+    sufijo_version = f"-v{hilo.turno + 1}" if es_vuelta else ""
+    instruccion = INSTRUCCION_SEGUIMIENTO if es_vuelta else INSTRUCCION_CORTA
+    nota_hilo = f" hilo #{hilo.id} vuelta {hilo.turno + 1}" if es_vuelta else ""
 
     archivos: list[str] = []
     try:

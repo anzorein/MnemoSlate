@@ -301,6 +301,23 @@ class TestHilosSender(unittest.TestCase):
         self.assertFalse(any("-v" in Path(a).name for a in res.archivos),
                          res.archivos)
 
+    def test_desarrollo_con_hilo_nuevo_no_versiona(self):
+        # /desarrollar ata el hilo en turno 0: desarrollo inicial (instrucción
+        # normal, sin sufijo), pero YA captura sesión para la primera /seguir.
+        hid = crear_hilo(self.conn, self.a, turno_inicial=0)
+        encolar_trabajo(self.conn, 1, [[self.a]], hilo_id=hid)
+        f = Fakes(salida=JSON_TRAZA)
+        res = procesar_trabajo(self.conn, self.infra, "tok", 1, f.entorno())
+        self.assertTrue(res.ok)
+        _, sesion, instruccion = f.sesiones[0]
+        self.assertEqual(sesion, "")
+        self.assertIn("campo prompt", instruccion)
+        self.assertFalse(any("-v" in Path(a).name for a in res.archivos),
+                         res.archivos)
+        h = obtener_hilo(self.conn, hid)
+        assert h is not None
+        self.assertEqual((h.turno, h.session_id), (1, "ses_1"))
+
     def test_fallback_sesion_fresca(self):
         hid, _ = self._trabajo_hilo()
 

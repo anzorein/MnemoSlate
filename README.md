@@ -203,6 +203,9 @@ Contrato Pi↔PC (`sender.py`, sin puertos públicos, RNF-3):
 - El hilo guarda `session_id` + `turno` en la DB (`hilos`, un hilo por idea). Si la
   sesión se podó en la PC, hay UN reintento como sesión fresca y el hilo se
   auto-cura (sin esto, un hilo muerto traba la cola).
+- `/desarrollar` de una sola idea también ata su hilo (nuevo en turno 0): sin
+  sufijo ni instrucción de vuelta, pero YA captura la sesión para que la primera
+  `/seguir` reanude de verdad. Lotes multi-idea van sueltos, como antes.
 - Una sola vuelta en cola por hilo: feedback → `/procesar` → feedback… (así el
   orden de la sesión y la numeración `-vN` nunca se rompen).
 

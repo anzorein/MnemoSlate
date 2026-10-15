@@ -387,3 +387,21 @@
 - **Pendiente en la Pi**: `pull` + re-correr `pip install -e .` en el venv (para
   generar los wrappers) + agregar los dos alias al `~/.bashrc`.
 
+## 2026-10-15 — Sesión 25 (hilos: la v1 también guarda sesión)
+- **Hueco encontrado al repasar el diseño antes del e2e**: `/desarrollar` no creaba
+  hilo, así que la sesión v1 se descartaba y la primera `/seguir` arrancaba fresca
+  en vez de reanudar (el resume prometido recién valía desde la vuelta 3).
+- Fix: `/desarrollar` de una sola idea hace get-or-create del hilo (nuevo en turno
+  0) y lo pone en `trabajo.hilo_id`; lotes multi-idea van sueltos como antes.
+- Regla refinada en el sender: solo es "vuelta" si `hilo.turno >= 1` (sufijo `-vN`
+  e `INSTRUCCION_SEGUIMIENTO`); con turno 0 es desarrollo inicial (instrucción
+  normal, sin sufijo) pero igual captura sesión y avanza a turno 1. Efecto
+  colateral coherente: re-desarrollar una idea con hilo genera `-v{N+1}`.
+- Tests: `test_desarrollo_con_hilo_nuevo_no_versiona` (sender),
+  `test_desarrollar_ata_hilo` + `test_desarrollar_lote_sin_hilo` (bot). En el camino
+  se repuso un import borrado por una edición (`recortar_preambulo`) y se
+  limpiaron imports inline.
+- **Suite: 140/140 OK.**
+- **Pendiente**: verificar `--session` en `opencode run` v1.18.33 y e2e real de dos
+  vueltas desde la Pi (ver pasos en el chat).
+
