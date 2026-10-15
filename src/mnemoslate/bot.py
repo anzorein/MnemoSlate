@@ -414,9 +414,13 @@ async def cmd_procesar(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     res = await asyncio.to_thread(
         procesar_trabajo, _conn(context), infra, st.bot_token, st.allowed_user_id
     )
-    await update.effective_message.reply_text(  # type: ignore[union-attr]
-        res.mensaje
-    )
+    # El sender ya avisó por Telegram (✅ + 🖥️/💤, o ⚠️/❌ ante fallos): reenviar
+    # res.mensaje duplicaría. Solo se responde cuando no hubo avisos, o sea
+    # cola vacía (trabajo_id == 0) — si no, /procesar quedaría en silencio.
+    if res.trabajo_id == 0:
+        await update.effective_message.reply_text(  # type: ignore[union-attr]
+            res.mensaje
+        )
 
 
 async def on_texto_libre(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:

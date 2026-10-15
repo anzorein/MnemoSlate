@@ -418,3 +418,15 @@
   `parse_mode="Markdown"` (heurística contra esta clase de bug).
 - **Suite: 142/142 OK.**
 
+## 2026-10-15 — Sesión 27 (tercer mensaje repetido en `/procesar`)
+- **Reporte del usuario (Pi, primer ciclo real, 6m40)**: tras ✅ + 🖥️ llegaba un
+  tercer mensaje repitiendo lo mismo. Causa: `cmd_procesar` reenviaba
+  `res.mensaje` aunque el sender ya había avisado todo (en CLI ese eco sí hace
+  falta: es la salida por stdout).
+- Fix en `cmd_procesar`: responde `res.mensaje` solo si `trabajo_id == 0` (cola
+  vacía, único camino sin avisos: NoHayPC/ErrorEnvio/éxitos notifican siempre).
+  DB del ciclo real confirmada sana: idea `procesada`, trabajo `hecho`,
+  `hilo_id=1` (el hilo v1 se creó bien).
+- Tests `TestProcesarSinEco` (con telegram): cola vacía responde, con trabajo no
+  hay eco. **Suite: 144/144 OK.**
+

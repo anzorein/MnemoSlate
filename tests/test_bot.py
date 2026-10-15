@@ -7,6 +7,7 @@ import re
 import sys
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
@@ -20,10 +21,12 @@ try:
         USO_TAG,
         build_app,
         cmd_desarrollar,
+        cmd_procesar,
         cmd_seguir,
         texto_comandos,
     )
-    from mnemoslate.config import Settings  # noqa: E402
+    from mnemoslate.config import InfraSettings, Settings  # noqa: E402
+    from mnemoslate.sender import Resultado  # noqa: E402
     from mnemoslate.db import (  # noqa: E402
         cambiar_estado,
         crear_idea,
@@ -203,6 +206,63 @@ class TestSeguir(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(trabajos), 1)
         self.assertEqual(trabajos[0].hilo_id, 0)
         self.assertIsNone(obtener_hilo_por_idea(self.conn, a))
+
+
+@unittest.skipUnless(HAS_TG, "requiere python-telegram-bot (venv)")
+class TestProcesarSinEco(unittest.IsolatedAsyncioTestCase):
+    """cmd_procesar no reenvía res.mensaje si el sender ya avisó (Sesión 27).
+
+    El sender notifica todo (✅ + 🖥️/💤, ⚠️/❌); el eco era un tercer mensaje
+    repetido. Solo cola vacía (trabajo_id == 0, único camino sin avisos)
+    responde el mensaje.
+    """
+
+    def _ctx(self, conn):
+        st = Settings(bot_token="123456:fake-test-token", allowed_user_id=1,
+                      database_path=Path(":memory:"))
+        infra = InfraSettings(pc_mac="11:22:33:44:55:66", pc_ip="192.0.2.15",
+                              ssh_user="u")
+
+        class Ctx:
+            args = []
+            application = type("App", (), {"bot_data": {
+                "conn": conn, "settings": st, "infra": infra}})()
+
+        return Ctx()
+
+    async def test_cola_vacia_responde(self):
+        import tempfile
+
+        tmp = tempfile.TemporaryDirectory()
+        conn = init_db(Path(tmp.name) / "t.db")
+        try:
+            update = _FakeUpdate()
+            with patch("mnemoslate.bot.procesar_trabajo",
+                       return_value=Resultado(0, True, "📭 Nada encolado.")):
+                await cmd_procesar(update, self._ctx(conn))
+            resp = update.effective_message.respuestas
+            self.assertEqual(len(resp), 2)  # ⏳ + mensaje
+            self.assertIn("Nada encolado", resp[1])
+        finally:
+            conn.close()
+            tmp.cleanup()
+
+    async def test_con_trabajo_no_hay_eco(self):
+        import tempfile
+
+        tmp = tempfile.TemporaryDirectory()
+        conn = init_db(Path(tmp.name) / "t.db")
+        try:
+            update = _FakeUpdate()
+            with patch("mnemoslate.bot.procesar_trabajo",
+                       return_value=Resultado(1, True, "✅ Trabajo #1: 1 archivo(s).",
+                                              ["a.md"])):
+                await cmd_procesar(update, self._ctx(conn))
+            resp = update.effective_message.respuestas
+            self.assertEqual(resp, ["⏳ Procesando cola (enciendo la PC si hace falta)…"])
+        finally:
+            conn.close()
+            tmp.cleanup()
 
 
 if __name__ == "__main__":
